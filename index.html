@@ -42,9 +42,19 @@ dayjs.locale('id');
   const SUPABASE_URL = 'https://rxwkaxcasgmjiyhltatn.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4d2theGNhc2dtaml5aGx0YXRuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk0ODYxMTgsImV4cCI6MjA4NTA2MjExOH0.jLk0YVDNLsluz1y07KOv1Ju8K2xiAONz_f1ecbLYpac';
   
-  // Inisialisasi Supabase dengan window reference
-  window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  console.log('Supabase connected:', window.supabaseClient);
+  // Inisialisasi Supabase dengan error handling
+  try {
+    if (typeof supabase !== 'undefined') {
+      window.supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      console.log('Supabase connected successfully:', window.supabaseClient);
+    } else {
+      console.error('Supabase library not loaded');
+      window.supabaseClient = null;
+    }
+  } catch (error) {
+    console.error('Failed to initialize Supabase:', error);
+    window.supabaseClient = null;
+  }
 </script>
 
 <!-- ExcelJS & FileSaver -->
@@ -696,7 +706,7 @@ foto:this.newTask.foto||null
         
         // Check internet connection for mobile
         if(navigator.userAgent.includes('Mobile') && !navigator.onLine){
-            // Fallback to localStorage for offline mobile
+            console.log('Mobile offline - saving to localStorage');
             this.savedTasks.unshift(entry);
             await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
             alert('Laporan tersimpan di perangkat (offline). Akan sinkronisasi saat online.');
@@ -706,7 +716,12 @@ foto:this.newTask.foto||null
 
         // Check Supabase client availability
         if(!window.supabaseClient){
-            throw new Error('Supabase client not available');
+            console.log('Supabase client not available - using localStorage fallback');
+            this.savedTasks.unshift(entry);
+            await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
+            alert('Supabase tidak tersedia. Laporan tersimpan di perangkat dan akan sinkronisasi nanti.');
+            this.resetTaskForm();
+            return;
         }
 
         // Mengirim data ke tabel 'tasks' di database Supabase
@@ -726,19 +741,19 @@ foto:this.newTask.foto||null
     } catch (err) {
         console.error('Error saving task:', err);
         
-        // Mobile fallback
-        if(navigator.userAgent.includes('Mobile')){
-            this.savedTasks.unshift(entry);
-            await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
-            alert('Terjadi error. Laporan tersimpan di perangkat dan akan sinkronisasi nanti.');
-            this.resetTaskForm();
-            return;
-        }
-        
-        // Desktop fallback
+        // Universal fallback - save to localStorage
         this.savedTasks.unshift(entry);
         await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
-        alert('Gagal menyimpan ke cloud. Laporan tersimpan di perangkat dan akan sinkronisasi nanti.');
+        
+        // Provide specific error message
+        if(err.message && err.message.includes('column')){
+            alert('Error database: Field tidak cocok. Laporan tersimpan di perangkat dan akan sinkronisasi nanti.');
+        } else if(err.message && err.message.includes('network')){
+            alert('Error jaringan. Laporan tersimpan di perangkat dan akan sinkronisasi nanti.');
+        } else {
+            alert('Terjadi error. Laporan tersimpan di perangkat dan akan sinkronisasi nanti.');
+        }
+        
         this.resetTaskForm();
     }
 
