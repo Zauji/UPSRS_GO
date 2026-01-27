@@ -682,23 +682,18 @@ id:Date.now(),
 tanggal:dayjs().format('DD/MM/YYYY'),
 waktu:dayjs().format('HH:mm'),
 teknisi:this.currentUser.name,
-teknisi_id:this.currentUser.id,
 gedung:this.newTask.gedung,
 ruangan:this.newTask.ruangan,
 pelapor:this.newTask.pelapor||'',
 masalah:this.newTask.masalah,
 penyelesaian:this.newTask.statusPekerjaan==='Selesai'?this.newTask.penyelesaian:this.newTask.alasanPending,
 statusPekerjaan:this.newTask.statusPekerjaan,
-foto:this.newTask.foto||null,
-device_id:navigator.userAgent.includes('Mobile')?'mobile-'+Date.now():'desktop-'+Date.now(),
-device_info:{
-userAgent:navigator.userAgent,
-platform:navigator.platform,
-isMobile:navigator.userAgent.includes('Mobile')
-}
+foto:this.newTask.foto||null
 };
 
     try {
+        console.log('Attempting to save task:', entry);
+        
         // Check internet connection for mobile
         if(navigator.userAgent.includes('Mobile') && !navigator.onLine){
             // Fallback to localStorage for offline mobile
@@ -709,28 +704,27 @@ isMobile:navigator.userAgent.includes('Mobile')
             return;
         }
 
+        // Check Supabase client availability
+        if(!window.supabaseClient){
+            throw new Error('Supabase client not available');
+        }
+
         // Mengirim data ke tabel 'tasks' di database Supabase
         const { data, error } = await window.supabaseClient
             .from('tasks') 
             .insert([entry]);
 
         if (error) {
-            // Fallback untuk mobile jika Supabase error
-            if(navigator.userAgent.includes('Mobile')){
-                this.savedTasks.unshift(entry);
-                await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
-                alert('Gagal menyimpan ke cloud. Laporan tersimpan di perangkat dan akan sinkronisasi nanti.');
-                this.resetTaskForm();
-                return;
-            }
+            console.error('Supabase error details:', error);
             throw error;
         }
 
+        console.log('Task saved successfully:', data);
         alert('Laporan berhasil disimpan ke Supabase!');
         this.resetTaskForm();
 
     } catch (err) {
-        console.error('Error:', err);
+        console.error('Error saving task:', err);
         
         // Mobile fallback
         if(navigator.userAgent.includes('Mobile')){
@@ -741,7 +735,11 @@ isMobile:navigator.userAgent.includes('Mobile')
             return;
         }
         
-        alert('Gagal menyimpan: ' + err.message);
+        // Desktop fallback
+        this.savedTasks.unshift(entry);
+        await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
+        alert('Gagal menyimpan ke cloud. Laporan tersimpan di perangkat dan akan sinkronisasi nanti.');
+        this.resetTaskForm();
     }
 
     // Refresh admin stats if Super Admin is logged in
