@@ -39,8 +39,8 @@ dayjs.locale('id');
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
   // Supabase Configuration - API URL dan Anon Key yang baru
-  const SUPABASE_URL = 'https://jhyimnevtnsxjiazramp.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpoeWltbmV2dG5zeGppYXpyYW1wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1MjQ0ODEsImV4cCI6MjA4NTEwMDQ4MX0.GKB5wULLc0YrUchgdiX5NpIdvpU4O0pHws1hjlE6vxk';
+  const SUPABASE_URL = 'https://buwvubvoljbdigxzyysl.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ1d3Z1YnZvbGpiZGlneHp5eXNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1Mzk3NDIsImV4cCI6MjA4NTExNTc0Mn0.TCH6ztbSXiODI42C6Vlr91_O5YGKcC-uj8xPUcu1GIg';
   
   // Inisialisasi Supabase dengan window reference
   window.supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -67,20 +67,16 @@ select.input-style{cursor:pointer}
 function appData(){
 return{
 page:'login',
-currentUser:null,
-viewingTask:null,
-viewingUser:null,
-isExporting:false,
-editingUser:null,
-
-authName:'',
 authUsername:'',
 authPassword:'',
+authName:'',
 authSpecialization:'',
 authProfilePhoto:null,
-showPass:false,
-
-// Admin statistics
+currentUser:null,
+isExporting:false,
+editingTask:null,
+viewingTask:null,
+viewingUser:null,
 adminStats:{
 todayTasks:0,
 weeklyTasks:0,
@@ -88,6 +84,10 @@ thisWeekCompleted:0,
 monthlyTasks:0,
 thisMonthCompleted:0
 },
+
+// State dasar untuk sync
+tasks: [],
+lastSyncTime: localStorage.getItem('last_sync_time'),
 
 // Storage management functions
 checkStorageQuota(){
@@ -228,13 +228,48 @@ dataLokasi:{
 savedTasks:[],
 registeredUsers:[],
 
+// State dasar untuk sync
+tasks: [],
+lastSyncTime: localStorage.getItem('last_sync_time'),
+
+// State koneksi
+isOnline: navigator.onLine,
+
+// State user auth
+currentUser: JSON.parse(localStorage.getItem('current_user')),
+
+// State sync progress
+syncProgress: 0,
+isSyncing: false,
+
+// State UI
+showPass: false,
+
+// Debounce timer
+syncDebounceTimer: null,
+
+// Fungsi init untuk listener
+init() {
+  window.addEventListener('online', () => {
+    this.isOnline = true;
+  });
+
+  window.addEventListener('offline', () => {
+    this.isOnline = false;
+  });
+},
+
 async initApp(){
 // Sync dari Supabase saat app dibuka
 await this.syncFromSupabase();
 
 this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
 this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
-const u=localStorage.getItem('upsrs_current_user');
+
+// Isi tasks state dengan savedTasks
+this.tasks = [...this.savedTasks];
+
+const u=localStorage.getItem('current_user');
 if(u){
 this.currentUser=JSON.parse(u);
 // Check if current user is Super Admin and redirect to admin dashboard
@@ -257,37 +292,76 @@ localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
 // Mobile online detection and auto-sync
 if(navigator.userAgent.includes('Mobile')){
 window.addEventListener('online',()=>{
-console.log('Mobile device online - syncing data...');
+console.log('Mobile device online - scheduling sync...');
+// Clear existing timer
+if(this.syncDebounceTimer){
+clearTimeout(this.syncDebounceTimer);
+}
+// Debounce sync untuk mencegah berlebihan
+this.syncDebounceTimer = setTimeout(() => {
+console.log('Executing debounced sync...');
 this.syncMobileTasks();
+}, 2000); // 2 detik delay
 });
+}
+
+// Bersihkan data lama saat online
+if (this.isOnline) {
+this.cleanLocalTasks();
 }
 },
 
 async syncMobileTasks(){
 try{
-const localTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
-const unsyncedTasks=localTasks.filter(task=>!task.synced_at);
-if(unsyncedTasks.length===0)return;
+// Prevent duplicate sync
+if(this.isSyncing){
+console.log('Sync already in progress, skipping...');
+return;
+}
 
-console.log(`Syncing ${unsyncedTasks.length} mobile tasks...`);
-for(const task of unsyncedTasks){
+this.isSyncing = true;
+this.syncProgress = 0;
+
+const unsynced = this.tasks.filter(t => !t.synced_at);
+const total = unsynced.length;
+
+if (total === 0) {
+console.log('No unsynced tasks found');
+this.isSyncing = false;
+return;
+}
+
+console.log(`Syncing ${total} unsynced tasks...`);
+
+for (let i = 0; i < total; i++) {
+const task = unsynced[i];
+
 const { error } = await window.supabaseClient
 .from('tasks')
-.insert([{
-...task,
-synced_at:new Date().toISOString()
-}]);
+.insert([task]);
 
-if(!error){
-task.synced_at=new Date().toISOString();
-}
+if (!error) {
+const now = new Date().toISOString();
+task.synced_at = now;
+
+this.lastSyncTime = now;
+localStorage.setItem('last_sync_time', now);
+console.log('Task synced successfully:', task.id);
+} else {
+console.error('Failed to sync task:', task.id, error);
 }
 
-await this.safeStorageSet('upsrs_tasks_v3', localTasks);
-await this.syncFromSupabase();
+this.syncProgress = Math.round(((i + 1) / total) * 100);
+}
+
+// Update localStorage dengan synced tasks
+await this.safeStorageSet('upsrs_tasks_v3', this.tasks);
+this.cleanLocalTasks();
+this.isSyncing = false;
 console.log('Mobile sync completed');
-}catch(error){
+} catch (error) {
 console.error('Mobile sync error:', error);
+this.isSyncing = false;
 }
 },
 
@@ -326,6 +400,7 @@ console.warn('Tasks table not found, using localStorage:', tasksError);
 this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
 }else if(tasks){
 this.savedTasks=tasks;
+this.tasks = [...tasks]; // Update tasks state
 localStorage.setItem('upsrs_tasks_v3',JSON.stringify(tasks));
 }
 }catch(err){
@@ -360,7 +435,7 @@ deleteAllAccounts(){
 if(!confirm('Apakah Anda yakin ingin menghapus SEMUA akun yang terdaftar? Tindakan ini tidak dapat dibatalkan!'))return;
 this.registeredUsers=[];
 localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
-localStorage.removeItem('upsrs_current_user');
+localStorage.removeItem('current_user');
 this.currentUser=null;
 this.page='login';
 alert('Semua akun telah dihapus!');
@@ -371,18 +446,13 @@ get filteredTasks(){
 if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
 return this.getAllUserTasks();
 }
+
 // Regular users only see their own tasks
-if(this.filterPeriod==='all')return this.savedTasks.filter(t=>t.teknisi===this.currentUser.name);
-const now=dayjs();
-return this.savedTasks.filter(t=>{
-const d=dayjs(t.tanggal,'DD/MM/YYYY');
-if(!d.isValid())return false;
-if(t.teknisi!==this.currentUser.name)return false; // Only user's own tasks
-if(this.filterPeriod==='today')return d.isSame(now,'day');
-if(this.filterPeriod==='week')return d.isAfter(now.subtract(7,'day'));
-if(this.filterPeriod==='month')return d.isSame(now,'month');
-return false;
-});
+if (this.currentUser?.role !== 'admin') {
+  return this.savedTasks.filter(t => t.user_id === this.currentUser.id);
+}
+
+return this.savedTasks;
 },
 
 get stats(){
@@ -435,7 +505,7 @@ const { data: u, error } = await window.supabaseClient
 if(!error && u){
 console.log('Login successful via Supabase:', u);
 this.currentUser = u;
-localStorage.setItem('upsrs_current_user', JSON.stringify(u));
+localStorage.setItem('current_user', JSON.stringify(u));
 this.page = u.role === 'admin' ? 'adminDashboard' : 'dashboard';
 this.authUsername='';
 this.authPassword='';
@@ -458,7 +528,7 @@ return alert('Login gagal! Periksa username dan password atau coba refresh halam
 
 console.log('Login successful via localStorage:', u);
 this.currentUser=u;
-localStorage.setItem('upsrs_current_user',JSON.stringify(u));
+localStorage.setItem('current_user',JSON.stringify(u));
 this.page='dashboard';
 this.authUsername='';
 this.authPassword='';
@@ -481,7 +551,7 @@ console.error('Login error:', error);
 const u=this.registeredUsers.find(x=>x.username===this.authUsername&&x.password===this.authPassword);
 if(u){
 this.currentUser=u;
-localStorage.setItem('upsrs_current_user',JSON.stringify(u));
+localStorage.setItem('current_user',JSON.stringify(u));
 this.page='dashboard';
 this.authUsername='';
 this.authPassword='';
@@ -590,7 +660,7 @@ const { data: u, error } = await window.supabaseClient
 
 if(!error && u){
 this.currentUser = u;
-localStorage.setItem('upsrs_current_user', JSON.stringify(u));
+localStorage.setItem('current_user', JSON.stringify(u));
 this.page = 'adminDashboard';
 this.authUsername='';
 this.authPassword='';
@@ -609,7 +679,7 @@ return alert('Login admin gagal! Periksa kredensial Anda.');
 }
 
 this.currentUser=u;
-localStorage.setItem('upsrs_current_user',JSON.stringify(u));
+localStorage.setItem('current_user',JSON.stringify(u));
 this.page='adminDashboard';
 this.authUsername='';
 this.authPassword='';
@@ -632,7 +702,7 @@ console.error('Admin login error:', error);
 const u=this.registeredUsers.find(x=>x.username===this.authUsername&&x.password===this.authPassword&&x.role==='admin');
 if(u){
 this.currentUser=u;
-localStorage.setItem('upsrs_current_user',JSON.stringify(u));
+localStorage.setItem('current_user',JSON.stringify(u));
 this.page='adminDashboard';
 this.authUsername='';
 this.authPassword='';
@@ -733,6 +803,7 @@ id:Date.now(),
 tanggal:dayjs().format('DD/MM/YYYY'),
 waktu:dayjs().format('HH:mm'),
 teknisi:this.currentUser.name,
+user_id: this.currentUser.id,
 gedung:this.newTask.gedung,
 ruangan:this.newTask.ruangan,
 pelapor:this.newTask.pelapor||'',
@@ -747,6 +818,7 @@ foto:this.newTask.foto||null
         if(navigator.userAgent.includes('Mobile') && !navigator.onLine){
             // Fallback to localStorage for offline mobile
             this.savedTasks.unshift(entry);
+            this.tasks.unshift(entry); // Update tasks state
             await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
             alert('Laporan tersimpan di perangkat (offline). Akan sinkronisasi saat online.');
             this.resetTaskForm();
@@ -758,10 +830,19 @@ foto:this.newTask.foto||null
             .from('tasks') 
             .insert([entry]);
 
+        if (!error) {
+            const now = new Date().toISOString();
+            entry.synced_at = now;
+
+            this.lastSyncTime = now;
+            localStorage.setItem('last_sync_time', now);
+        }
+
         if (error) {
             // Fallback untuk mobile jika Supabase error
             if(navigator.userAgent.includes('Mobile')){
                 this.savedTasks.unshift(entry);
+                this.tasks.unshift(entry); // Update tasks state
                 await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
                 alert('Gagal menyimpan ke cloud. Laporan tersimpan di perangkat dan akan sinkronisasi nanti.');
                 this.resetTaskForm();
@@ -769,6 +850,11 @@ foto:this.newTask.foto||null
             }
             throw error;
         }
+
+        // Update tasks state saat berhasil
+        this.savedTasks.unshift(entry);
+        this.tasks.unshift(entry);
+        await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
 
         alert('Laporan berhasil disimpan ke Supabase!');
         this.resetTaskForm();
@@ -779,6 +865,7 @@ foto:this.newTask.foto||null
         // Mobile fallback
         if(navigator.userAgent.includes('Mobile')){
             this.savedTasks.unshift(entry);
+            this.tasks.unshift(entry); // Update tasks state
             await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
             alert('Terjadi error. Laporan tersimpan di perangkat dan akan sinkronisasi nanti.');
             this.resetTaskForm();
@@ -867,7 +954,7 @@ this.isExporting=false;
 },
 
 logout(){
-localStorage.removeItem('upsrs_current_user');
+localStorage.removeItem('current_user');
 this.currentUser=null;
 this.page='login';
 },
@@ -878,13 +965,6 @@ return this.currentUser?.role==='admin';
 },
 
 get regularUsers(){
-// Force refresh dari Supabase untuk mendapatkan data terbaru
-this.syncFromSupabase().then(() => {
-// Force refresh dari localStorage untuk backup
-const latestUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
-this.registeredUsers=latestUsers;
-});
-
 // Filter user biasa (bukan admin)
 return this.registeredUsers.filter(u=>u.role!=='admin');
 },
@@ -1169,6 +1249,35 @@ return dateB.isAfter(dateA)?1:-1;
 });
 },
 
+// Fungsi pembersih localStorage
+cleanLocalTasks() {
+  this.tasks = this.tasks.filter(task => !task.synced_at);
+  localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.tasks));
+},
+
+// Fungsi Sync Sekarang untuk manual sync
+async syncNow() {
+  if (!navigator.onLine) {
+    alert('❌ Tidak ada koneksi internet');
+    return;
+  }
+
+  try {
+    await this.syncMobileTasks();
+    await this.syncFromSupabase();
+    this.cleanLocalTasks();
+
+    const now = new Date().toISOString();
+    this.lastSyncTime = now;
+    localStorage.setItem('last_sync_time', now);
+
+    alert('✅ Sinkronisasi selesai');
+  } catch (err) {
+    console.error(err);
+    alert('❌ Gagal sinkronisasi');
+  }
+},
+
 // Refresh user list dari Supabase
 async refreshUserList(){
 try{
@@ -1254,7 +1363,7 @@ profile_photo:this.newUserProfile.profile_photo
 };
 
 localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
-localStorage.setItem('upsrs_current_user',JSON.stringify(this.registeredUsers[userIndex]));
+localStorage.setItem('current_user',JSON.stringify(this.registeredUsers[userIndex]));
 this.currentUser=this.registeredUsers[userIndex];
 alert('Profil berhasil diperbarui!');
 this.page='dashboard';
@@ -1369,20 +1478,34 @@ this.page='dashboard';
 </div>
 <div class="flex gap-2">
 <button @click="viewUserProfile(currentUser)" class="px-3 py-2 bg-blue-100 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-200">Profil</button>
+<button @click="syncNow()" :disabled="!navigator.onLine" class="px-3 py-2 rounded-xl text-xs font-bold bg-sky-100 text-sky-700 disabled:opacity-50 disabled:cursor-not-allowed">🔘 Sync Sekarang</button>
+<div x-show="isSyncing" class="mt-2">
+  <div class="w-full bg-slate-200 rounded-full h-2">
+    <div class="bg-sky-500 h-2 rounded-full transition-all" :style="`width: ${syncProgress}%`"></div>
+  </div>
+  <div class="text-xs text-slate-500 mt-1">
+    Sync: <span x-text="syncProgress"></span>%
+  </div>
+</div>
+<div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold" :class="isOnline ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'">
+<span x-text="isOnline ? '🟢 Online' : '🔴 Offline'"></span>
+</div>
 <template x-if="isAdmin">
 <button @click="page='admin'" class="px-3 py-2 bg-purple-100 text-purple-600 rounded-xl text-sm font-bold hover:bg-purple-200">Admin</button>
 </template>
 <button @click="logout" class="px-4 py-2 bg-red-100 text-red-600 rounded-xl text-sm font-bold hover:bg-red-200">Logout</button>
 </div>
-</div>
-
 <!-- Stats -->
 <div class="bg-white p-5 rounded-2xl mb-6 shadow-sm border border-slate-100">
 <div class="flex gap-2 mb-4 p-1 bg-slate-50 rounded-xl">
-<button @click="filterPeriod='all'" :class="filterPeriod==='all'?'bg-white shadow text-blue-600':'text-slate-400'" class="flex-1 py-2 rounded-lg text-xs font-bold">Semua</button>
-<button @click="filterPeriod='today'" :class="filterPeriod==='today'?'bg-white shadow text-blue-600':'text-slate-400'" class="flex-1 py-2 rounded-lg text-xs font-bold">Hari</button>
-<button @click="filterPeriod='week'" :class="filterPeriod==='week'?'bg-white shadow text-blue-600':'text-slate-400'" class="flex-1 py-2 rounded-lg text-xs font-bold">Minggu</button>
-<button @click="filterPeriod='month'" :class="filterPeriod==='month'?'bg-white shadow text-blue-600':'text-slate-400'" class="flex-1 py-2 rounded-lg text-xs font-bold">Bulan</button>
+<button @click="filterPeriod='all'" :class="filterPeriod==='all'?'bg-white shadow-sm text-blue-600':''" class="flex-1 py-2 rounded-lg text-xs font-bold">Semua</button>
+<button @click="filterPeriod='today'" :class="filterPeriod==='today'?'bg-white shadow-sm text-blue-600':''" class="flex-1 py-2 rounded-lg text-xs font-bold">Hari Ini</button>
+<button @click="filterPeriod='week'" :class="filterPeriod==='week'?'bg-white shadow-sm text-blue-600':''" class="flex-1 py-2 rounded-lg text-xs font-bold">Minggu Ini</button>
+<button @click="filterPeriod='month'" :class="filterPeriod==='month'?'bg-white shadow-sm text-blue-600':''" class="flex-1 py-2 rounded-lg text-xs font-bold">Bulan Ini</button>
+</div>
+<div class="text-xs text-slate-400 mt-2">
+🕒 Terakhir sync:
+<span x-text="lastSyncTime ? dayjs(lastSyncTime).format('DD/MM/YYYY HH:mm') : 'Belum pernah'"></span>
 </div>
 <div class="grid grid-cols-3 gap-4 text-center">
 <div>
@@ -1503,6 +1626,10 @@ this.page='dashboard';
 <p class="text-xs text-slate-400" x-text="`${task.tanggal} ${task.waktu}`"></p>
 <div class="mt-2">
 <span :class="task.statusPekerjaan==='Selesai'?'bg-emerald-100 text-emerald-700':'bg-orange-100 text-orange-700'" class="px-2 py-1 rounded text-xs font-bold" x-text="task.statusPekerjaan"></span>
+</div>
+<div class="mt-1 text-xs font-bold">
+<span x-show="task.synced_at" class="text-blue-600">☁️ Tersinkron</span>
+<span x-show="!task.synced_at" class="text-orange-600">📱 Menunggu Sync</span>
 </div>
 </div>
 </div>
