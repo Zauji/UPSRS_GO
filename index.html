@@ -419,8 +419,12 @@ async handleLogin(){
 if(!this.authUsername||!this.authPassword)return alert('Isi username dan password!');
 
 try{
-// Try login via Supabase first for desktop
-if(!navigator.userAgent.includes('Mobile') && window.supabaseClient){
+// Force sync dulu untuk mendapatkan data terbaru dari Supabase
+await this.syncFromSupabase();
+
+// Coba login via Supabase dulu (untuk semua device)
+if(window.supabaseClient){
+console.log('Trying login via Supabase...');
 const { data: u, error } = await window.supabaseClient
 .from('users')
 .select('*')
@@ -429,33 +433,38 @@ const { data: u, error } = await window.supabaseClient
 .single();
 
 if(!error && u){
+console.log('Login successful via Supabase:', u);
 this.currentUser = u;
 localStorage.setItem('upsrs_current_user', JSON.stringify(u));
 this.page = u.role === 'admin' ? 'adminDashboard' : 'dashboard';
 this.authUsername='';
 this.authPassword='';
 return;
+}else if(error){
+console.log('Supabase login error:', error);
 }
 }
 
-// Fallback to localStorage
+// Fallback ke localStorage
+console.log('Trying login via localStorage...');
 const u=this.registeredUsers.find(x=>x.username===this.authUsername&&x.password===this.authPassword);
 if(!u){
 if(navigator.userAgent.includes('Mobile')){
 return alert('Login gagal! Periksa koneksi internet dan coba lagi.');
 }else{
-return alert('Login gagal! Periksa username dan password.');
+return alert('Login gagal! Periksa username dan password atau coba refresh halaman.');
 }
 }
 
+console.log('Login successful via localStorage:', u);
 this.currentUser=u;
 localStorage.setItem('upsrs_current_user',JSON.stringify(u));
 this.page='dashboard';
 this.authUsername='';
 this.authPassword='';
 
-// Sync user data to Supabase for desktop
-if(!navigator.userAgent.includes('Mobile') && window.supabaseClient){
+// Sync user data ke Supabase untuk backup
+if(window.supabaseClient){
 try{
 await window.supabaseClient
 .from('users')
@@ -468,7 +477,7 @@ console.log('Sync to Supabase failed, but login successful');
 
 }catch(error){
 console.error('Login error:', error);
-// Final fallback to localStorage
+// Final fallback ke localStorage
 const u=this.registeredUsers.find(x=>x.username===this.authUsername&&x.password===this.authPassword);
 if(u){
 this.currentUser=u;
@@ -497,12 +506,13 @@ specialization:this.authSpecialization||'',
 profile_photo:this.authProfilePhoto||null
 };
 
-// Simpan ke Supabase
-this.saveUserToSupabase(newUser);
-
-// Simpan ke localStorage fallback
+// Simpan ke localStorage dulu (immediate)
 this.registeredUsers.push(newUser);
 localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
+
+// Simpan ke Supabase (async) untuk semua device
+this.saveUserToSupabase(newUser);
+
 alert('Daftar berhasil! Silahkan login');
 this.page='login';
 this.authName='';
@@ -518,7 +528,27 @@ if(!window.supabaseClient){
 console.error('Supabase client not available');
 return;
 }
-const { error } = await window.supabaseClient
+
+console.log('Saving user to Supabase:', user);
+
+// Cek apakah user sudah ada di Supabase
+const { data: existingUser, error: checkError } = await window.supabaseClient
+.from('users')
+.select('*')
+.eq('username', user.username)
+.single();
+
+if(checkError && checkError.code !== 'PGRST116'){
+console.error('Error checking existing user:', checkError);
+}
+
+if(existingUser){
+console.log('User already exists in Supabase:', existingUser);
+return;
+}
+
+// Simpan user baru ke Supabase
+const { data, error } = await window.supabaseClient
 .from('users')
 .insert([user]);
 
@@ -526,11 +556,17 @@ if(error){
 console.error('Error saving user to Supabase:', error);
 if(error.code === '23514'){
 alert('Error: Role tidak valid. Menggunakan fallback localStorage.');
+}else if(error.code === '23505'){
+alert('Username sudah ada di database. Gunakan username lain.');
 }else{
 alert('Gagal menyimpan ke cloud: ' + error.message);
 }
 }else{
-console.log('User berhasil disimpan ke Supabase');
+console.log('User berhasil disimpan ke Supabase:', data);
+// Force sync untuk memastikan data terupdate
+setTimeout(() => {
+this.syncFromSupabase();
+}, 1000);
 }
 }catch(error){
 console.error('Error saving user to Supabase:', error);
@@ -842,9 +878,14 @@ return this.currentUser?.role==='admin';
 },
 
 get regularUsers(){
-// Force refresh from localStorage to get latest users
+// Force refresh dari Supabase untuk mendapatkan data terbaru
+this.syncFromSupabase().then(() => {
+// Force refresh dari localStorage untuk backup
 const latestUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
 this.registeredUsers=latestUsers;
+});
+
+// Filter user biasa (bukan admin)
 return this.registeredUsers.filter(u=>u.role!=='admin');
 },
 
@@ -1126,6 +1167,18 @@ const dateA=dayjs(a.tanggal,'DD/MM/YYYY');
 const dateB=dayjs(b.tanggal,'DD/MM/YYYY');
 return dateB.isAfter(dateA)?1:-1;
 });
+},
+
+// Refresh user list dari Supabase
+async refreshUserList(){
+try{
+console.log('Refreshing user list from Supabase...');
+await this.syncFromSupabase();
+alert('Daftar user berhasil diperbarui!');
+}catch(error){
+console.error('Error refreshing user list:', error);
+alert('Gagal memperbarui daftar user. Silakan coba lagi.');
+}
 },
 
 deleteUser(userId){
