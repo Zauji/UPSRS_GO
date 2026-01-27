@@ -1,0 +1,1959 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UPSRS GO! - Pro Edition</title>
+
+<!-- Favicon -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
+
+<!-- Tailwind CSS -->
+<script>
+  // Disable all Tailwind CDN warnings for production
+  window.TAILWIND_DISABLE_TOUCH = true;
+  // Override console.warn to suppress Tailwind warnings only
+  const originalWarn = console.warn;
+  console.warn = function(...args) {
+    if (typeof args[0] === 'string' && args[0].includes('cdn.tailwindcss.com should not be used in production')) {
+      return; // Suppress this specific warning
+    }
+    return originalWarn.apply(console, args);
+  };
+</script>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- DayJS -->
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1/locale/id.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/customParseFormat.js"></script>
+<script>
+dayjs.extend(dayjs_plugin_customParseFormat);
+dayjs.locale('id');
+</script>
+
+<!-- Alpine.js -->
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+<!-- Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  // Supabase Configuration - API URL dan Anon Key yang baru
+  const SUPABASE_URL = 'https://rxwkaxcasgmjiyhltatn.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4d2theGNhc2dtaml5aGx0YXRuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk0ODYxMTgsImV4cCI6MjA4NTA2MjExOH0.jLk0YVDNLsluz1y07KOv1Ju8K2xiAONz_f1ecbLYpac';
+  
+  // Inisialisasi Supabase dengan window reference
+  window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  console.log('Supabase connected:', window.supabaseClient);
+</script>
+
+<!-- ExcelJS & FileSaver -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+[x-cloak]{display:none !important}
+body{font-family:'Plus Jakarta Sans',sans-serif;background:#f8fafc}
+.input-style{width:100%;padding:1rem;border-radius:1rem;font-weight:600;background:#f1f5f9;border:1px solid transparent;outline:none;transition:all 0.3s}
+.input-style:focus{background:white;border-color:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,0.1)}
+textarea.input-style{min-height:100px;resize:vertical}
+select.input-style{cursor:pointer}
+</style>
+
+<script>
+function appData(){
+return{
+page:'login',
+currentUser:null,
+viewingTask:null,
+viewingUser:null,
+isExporting:false,
+editingUser:null,
+
+authName:'',
+authUsername:'',
+authPassword:'',
+authSpecialization:'',
+authProfilePhoto:null,
+showPass:false,
+
+// Admin statistics
+adminStats:{
+todayTasks:0,
+weeklyTasks:0,
+thisWeekCompleted:0,
+monthlyTasks:0,
+thisMonthCompleted:0
+},
+
+// Storage management functions
+checkStorageQuota(){
+try{
+const testKey='test_quota';
+const testData='x'.repeat(1024*1024); // 1MB test
+localStorage.setItem(testKey,testData);
+localStorage.removeItem(testKey);
+return {available:true,estimated:5}; // ~5MB available
+}catch(error){
+if(error.name==='QuotaExceededError'){
+return {available:false,estimated:0};
+}
+return {available:true,estimated:5};
+}
+},
+
+cleanupOldTasks(keepLastCount=50){
+try{
+const tasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
+if(tasks.length>keepLastCount){
+const sortedTasks=tasks.sort((a,b)=>(b.id||0)-(a.id||0));
+const keepTasks=sortedTasks.slice(0,keepLastCount);
+localStorage.setItem('upsrs_tasks_v3',JSON.stringify(keepTasks));
+console.log(`Cleaned up ${tasks.length-keepLastCount} old tasks`);
+return tasks.length-keepLastCount;
+}
+return 0;
+}catch(error){
+console.error('Cleanup error:',error);
+return 0;
+}
+},
+
+compressImageBase64(base64String,maxSize=50000){
+try{
+if(!base64String||!base64String.startsWith('data:image/'))return base64String;
+const canvas=document.createElement('canvas');
+const ctx=canvas.getContext('2d');
+const img=new Image();
+img.src=base64String;
+return new Promise((resolve)=>{
+img.onload=()=>{
+let width=img.width;
+let height=img.height;
+const maxSizePixels=800;
+if(width>height&&width>maxSizePixels){
+height*=maxSizePixels/width;
+width=maxSizePixels;
+}else if(height>maxSizePixels){
+width*=maxSizePixels/height;
+height=maxSizePixels;
+}
+canvas.width=width;
+canvas.height=height;
+ctx.drawImage(img,0,0,width,height);
+let compressed=canvas.toDataURL('image/jpeg',0.7);
+while(compressed.length>maxSize&&compressed.length>10000){
+const quality=0.7-0.1;
+compressed=canvas.toDataURL('image/jpeg',quality);
+}
+resolve(compressed);
+};
+img.onerror=()=>resolve(base64String);
+});
+}catch(error){
+console.error('Compression error:',error);
+return base64String;
+}
+},
+
+async safeStorageSet(key,data){
+try{
+const quota=this.checkStorageQuota();
+if(!quota.available){
+if(key==='upsrs_tasks_v3'){
+this.cleanupOldTasks(30);
+}
+throw new Error('Storage full');
+}
+const jsonString=JSON.stringify(data);
+if(jsonString.length>4*1024*1024){
+throw new Error('Data too large');
+}
+localStorage.setItem(key,jsonString);
+return true;
+}catch(error){
+console.error('Storage error:',error);
+if(error.message.includes('full')||error.message.includes('large')){
+alert('Penyimpanan lokal penuh. Data akan disimpan ke cloud saja.');
+return false;
+}
+return false;
+}
+},
+
+// Editing states
+editingTask:null,
+editingUserProfile:{
+newName:'',
+newUsername:'',
+newPassword:'',
+newSpecialization:'',
+profile_photo:null
+},
+
+filterPeriod:'all',
+
+newTask:{
+gedung:'',
+ruangan:'',
+pelapor:'',
+masalah:'',
+penyelesaian:'',
+statusPekerjaan:'Selesai',
+alasanPending:'',
+foto:null
+},
+
+newUserProfile:{
+name:'',
+username:'',
+password:'',
+profile_photo:null
+},
+
+dataLokasi:{
+'Gedung Klinik':['Administrasi','Apotek','Aula','Depan Klinik','Kamar Dokter Wanita','Kamar Mandi','Parkiran Klinik','Pojok Asi','Poli KIA','Poli Umum','Rekam Medis','Ruang PI','Ruang Tunggu','Ruang UGD'],
+'RS Lantai 1':['Administrasi','Anamesa','Farmasi','Kamar Dokter','Laboratorium','Lobby Depan','Nurse Station Lantai 1','Pendaftaran','PIPP','Pojok Asi','Poli Anak','Poli Bedah','Poli Obgyn','Poli Urologi/Penyakit Dalam','Rekam Medis','UGD Maternal','UGD Umum'],
+'RS Lantai 2':['Aula','Nurse Station Lantai 2','Ranap Alpukat','Ranap Anggur','Ranap Apel','Ranap Delima','Ranap Dukuh','Ranap Durian','Ranap Isolasi Airbone','Ranap Isolasi Umum','Ranap Jeruk','Ranap Kiwi','Ranap Leci','Ranap Lemon','Ranap Manggis','Ranap Melon','Ranap Nangka','Ranap Semangka','ESWL'],
+'OKA':['Kamar Mandi','Oksigen Sentral','Ruang CSSD','Ruang Ganti Dokter','Ruang Ganti Perawat','Ruang HCU','Ruang OKA 1','Ruang OKA 2','Ruang Persiapan Operasi','Ruang PI','Ruang Rehabilitasi Medis','Ruang Tengah'],
+'ICU':['Kamar Dokter Atas','Kamar Mandi','Ruang HCU','Ruang ICU','Ruang Perina','Ruang Tengah'],
+'Kantin':['Dapur Lantai Atas','Gudang Kantin','Inventory','Kamar Dokter','Ruang Makan','Ruang Masak','Ruang Terbuka Atas'],
+'Paviliun':['Gudang Kebersihan','Pantry','Ruang Bagian Umum','Ruang Casemix','Ruang Direktur','Ruang Keuangan','Ruang Marketing','Ruang Server'],
+'Lainnya':['Dapur','Genset','Ruang Barang','Ruang Berkas','Linen','Mess Belakang','Mess Depan','Mushola','Parkiran Umum','Parkiran Karyawan','UPSRS']
+},
+
+savedTasks:[],
+registeredUsers:[],
+
+async initApp(){
+// Sync dari Supabase saat app dibuka
+await this.syncFromSupabase();
+
+this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
+this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
+const u=localStorage.getItem('upsrs_current_user');
+if(u){
+this.currentUser=JSON.parse(u);
+// Check if current user is Super Admin and redirect to admin dashboard
+if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
+this.page='adminDashboard';
+await this.refreshAdminStats();
+}else{
+this.page='dashboard';
+}
+}
+
+// Ensure Super Admin account always exists
+const adminUser=this.registeredUsers.find(x=>x.username==='Admin');
+
+if(!adminUser){
+this.registeredUsers.push({id:999,name:'Super Admin',username:'Admin',password:'oTikaoke',role:'admin',profile_photo:null});
+localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
+}
+
+// Mobile online detection and auto-sync
+if(navigator.userAgent.includes('Mobile')){
+window.addEventListener('online',()=>{
+console.log('Mobile device online - syncing data...');
+this.syncMobileTasks();
+});
+}
+},
+
+async syncMobileTasks(){
+try{
+const localTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
+const unsyncedTasks=localTasks.filter(task=>!task.synced_at);
+if(unsyncedTasks.length===0)return;
+
+console.log(`Syncing ${unsyncedTasks.length} mobile tasks...`);
+for(const task of unsyncedTasks){
+const { error } = await window.supabaseClient
+.from('tasks')
+.insert([{
+...task,
+synced_at:new Date().toISOString()
+}]);
+
+if(!error){
+task.synced_at=new Date().toISOString();
+}
+}
+
+await this.safeStorageSet('upsrs_tasks_v3', localTasks);
+await this.syncFromSupabase();
+console.log('Mobile sync completed');
+}catch(error){
+console.error('Mobile sync error:', error);
+}
+},
+
+// Sync data dari Supabase ke localStorage
+async syncFromSupabase(){
+try{
+// Pastikan supabaseClient tersedia
+if(!window.supabaseClient){
+console.error('Supabase client not initialized');
+// Fallback ke localStorage
+this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
+this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
+return;
+}
+
+// Sync users
+const { data: users } = await window.supabaseClient.from('users').select('*');
+if(users){
+this.registeredUsers = users;
+await this.safeStorageSet('upsrs_users_v3', users);
+}
+
+// Sync tasks
+const { data: tasks } = await window.supabaseClient.from('tasks').select('*').order('id', { ascending: false });
+if(tasks){
+this.savedTasks = tasks;
+await this.safeStorageSet('upsrs_tasks_v3', tasks);
+}
+
+console.log('Sync from Supabase completed');
+}catch(error){
+console.error('Sync error:', error);
+// Fallback ke localStorage jika gagal
+this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
+this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
+}
+},
+
+// Refresh admin statistics
+async refreshAdminStats(){
+const now = dayjs();
+const allTasks = this.savedTasks;
+
+this.adminStats = {
+todayTasks: allTasks.filter(t => dayjs(t.tanggal, 'DD/MM/YYYY').isSame(now, 'day')).length,
+weeklyTasks: allTasks.filter(t => dayjs(t.tanggal, 'DD/MM/YYYY').isAfter(now.subtract(7, 'day'))).length,
+thisWeekCompleted: allTasks.filter(t => dayjs(t.tanggal, 'DD/MM/YYYY').isAfter(now.subtract(7, 'day')) && t.statusPekerjaan === 'Selesai').length,
+monthlyTasks: allTasks.filter(t => dayjs(t.tanggal, 'DD/MM/YYYY').isSame(now, 'month')).length,
+thisMonthCompleted: allTasks.filter(t => dayjs(t.tanggal, 'DD/MM/YYYY').isSame(now, 'month') && t.statusPekerjaan === 'Selesai').length
+};
+},
+
+// Delete all registered accounts
+deleteAllAccounts(){
+if(!confirm('Apakah Anda yakin ingin menghapus SEMUA akun yang terdaftar? Tindakan ini tidak dapat dibatalkan!'))return;
+this.registeredUsers=[];
+localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
+localStorage.removeItem('upsrs_current_user');
+this.currentUser=null;
+this.page='login';
+alert('Semua akun telah dihapus!');
+},
+
+get filteredTasks(){
+// Super Admin can see all tasks, regular users only see their own
+if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
+return this.getAllUserTasks();
+}
+// Regular users only see their own tasks
+if(this.filterPeriod==='all')return this.savedTasks.filter(t=>t.teknisi===this.currentUser.name);
+const now=dayjs();
+return this.savedTasks.filter(t=>{
+const d=dayjs(t.tanggal,'DD/MM/YYYY');
+if(!d.isValid())return false;
+if(t.teknisi!==this.currentUser.name)return false; // Only user's own tasks
+if(this.filterPeriod==='today')return d.isSame(now,'day');
+if(this.filterPeriod==='week')return d.isAfter(now.subtract(7,'day'));
+if(this.filterPeriod==='month')return d.isSame(now,'month');
+return false;
+});
+},
+
+get stats(){
+return{
+total:this.filteredTasks.length,
+selesai:this.filteredTasks.filter(t=>t.statusPekerjaan==='Selesai').length,
+pending:this.filteredTasks.filter(t=>t.statusPekerjaan==='Belum Selesai').length
+}
+},
+
+// Get user statistics for admin dashboard
+getUserStats(userId){
+const user = this.registeredUsers.find(u => u.id === userId);
+if(!user) return { totalTasks: 0, completedTasks: 0, pendingTasks: 0 };
+const userTasks = this.savedTasks.filter(t => t.teknisi === user.name);
+return{
+totalTasks:userTasks.length,
+completedTasks:userTasks.filter(t=>t.statusPekerjaan==='Selesai').length,
+pendingTasks:userTasks.filter(t=>t.statusPekerjaan==='Belum Selesai').length
+}
+},
+
+// Safe wrapper for getUserStats
+safeGetUserStats(userId){
+try{
+return this.getUserStats(userId);
+}catch(error){
+console.error('Error getting user stats:', error);
+return { totalTasks: 0, completedTasks: 0, pendingTasks: 0 };
+}
+},
+
+async handleLogin(){
+if(!this.authUsername||!this.authPassword)return alert('Isi username dan password!');
+
+try{
+// Try login via Supabase first for desktop
+if(!navigator.userAgent.includes('Mobile') && window.supabaseClient){
+const { data: u, error } = await window.supabaseClient
+.from('users')
+.select('*')
+.eq('username', this.authUsername)
+.eq('password', this.authPassword)
+.single();
+
+if(!error && u){
+this.currentUser = u;
+localStorage.setItem('upsrs_current_user', JSON.stringify(u));
+this.page = u.role === 'admin' ? 'adminDashboard' : 'dashboard';
+this.authUsername='';
+this.authPassword='';
+return;
+}
+}
+
+// Fallback to localStorage
+const u=this.registeredUsers.find(x=>x.username===this.authUsername&&x.password===this.authPassword);
+if(!u){
+if(navigator.userAgent.includes('Mobile')){
+return alert('Login gagal! Periksa koneksi internet dan coba lagi.');
+}else{
+return alert('Login gagal! Periksa username dan password.');
+}
+}
+
+this.currentUser=u;
+localStorage.setItem('upsrs_current_user',JSON.stringify(u));
+this.page='dashboard';
+this.authUsername='';
+this.authPassword='';
+
+// Sync user data to Supabase for desktop
+if(!navigator.userAgent.includes('Mobile') && window.supabaseClient){
+try{
+await window.supabaseClient
+.from('users')
+.upsert([u]);
+console.log('User synced to Supabase');
+}catch(syncError){
+console.log('Sync to Supabase failed, but login successful');
+}
+}
+
+}catch(error){
+console.error('Login error:', error);
+// Final fallback to localStorage
+const u=this.registeredUsers.find(x=>x.username===this.authUsername&&x.password===this.authPassword);
+if(u){
+this.currentUser=u;
+localStorage.setItem('upsrs_current_user',JSON.stringify(u));
+this.page='dashboard';
+this.authUsername='';
+this.authPassword='';
+alert('Login berhasil (offline mode).');
+}else{
+alert('Login gagal! Periksa username dan password.');
+}
+}
+},
+
+handleRegister(){
+if(!this.authName||!this.authUsername||!this.authPassword)return alert('Lengkapi data!');
+if(this.registeredUsers.find(x=>x.username===this.authUsername))return alert('Username sudah ada!');
+
+const newUser={
+id:Date.now(),
+name:this.authName,
+username:this.authUsername,
+password:this.authPassword,
+role:'user',
+specialization:this.authSpecialization||'',
+profile_photo:this.authProfilePhoto||null
+};
+
+// Simpan ke Supabase
+this.saveUserToSupabase(newUser);
+
+// Simpan ke localStorage fallback
+this.registeredUsers.push(newUser);
+localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
+alert('Daftar berhasil! Silahkan login');
+this.page='login';
+this.authName='';
+this.authUsername='';
+this.authPassword='';
+this.authSpecialization='';
+this.authProfilePhoto=null;
+},
+
+async saveUserToSupabase(user){
+try{
+if(!window.supabaseClient){
+console.error('Supabase client not available');
+return;
+}
+const { error } = await window.supabaseClient
+.from('users')
+.insert([user]);
+
+if(error){
+console.error('Error saving user to Supabase:', error);
+if(error.code === '23514'){
+alert('Error: Role tidak valid. Menggunakan fallback localStorage.');
+}else{
+alert('Gagal menyimpan ke cloud: ' + error.message);
+}
+}else{
+console.log('User berhasil disimpan ke Supabase');
+}
+}catch(error){
+console.error('Error saving user to Supabase:', error);
+alert('Terjadi kesalahan saat menyimpan ke cloud. Data tersimpan di localStorage.');
+}
+},
+
+async handleAdminLogin(){
+if(!this.authUsername||!this.authPassword)return alert('Isi username dan password admin!');
+
+try{
+// Try admin login via Supabase first for desktop
+if(!navigator.userAgent.includes('Mobile') && window.supabaseClient){
+const { data: u, error } = await window.supabaseClient
+.from('users')
+.select('*')
+.eq('username', this.authUsername)
+.eq('password', this.authPassword)
+.eq('role', 'admin')
+.single();
+
+if(!error && u){
+this.currentUser = u;
+localStorage.setItem('upsrs_current_user', JSON.stringify(u));
+this.page = 'adminDashboard';
+this.authUsername='';
+this.authPassword='';
+return;
+}
+}
+
+// Fallback to localStorage
+const u=this.registeredUsers.find(x=>x.username===this.authUsername&&x.password===this.authPassword&&x.role==='admin');
+if(!u){
+if(navigator.userAgent.includes('Mobile')){
+return alert('Login admin gagal! Periksa koneksi internet dan coba lagi.');
+}else{
+return alert('Login admin gagal! Periksa kredensial Anda.');
+}
+}
+
+this.currentUser=u;
+localStorage.setItem('upsrs_current_user',JSON.stringify(u));
+this.page='adminDashboard';
+this.authUsername='';
+this.authPassword='';
+
+// Sync admin data to Supabase for desktop
+if(!navigator.userAgent.includes('Mobile') && window.supabaseClient){
+try{
+await window.supabaseClient
+.from('users')
+.upsert([u]);
+console.log('Admin synced to Supabase');
+}catch(syncError){
+console.log('Sync to Supabase failed, but admin login successful');
+}
+}
+
+}catch(error){
+console.error('Admin login error:', error);
+// Final fallback to localStorage
+const u=this.registeredUsers.find(x=>x.username===this.authUsername&&x.password===this.authPassword&&x.role==='admin');
+if(u){
+this.currentUser=u;
+localStorage.setItem('upsrs_current_user',JSON.stringify(u));
+this.page='adminDashboard';
+this.authUsername='';
+this.authPassword='';
+alert('Login admin berhasil (offline mode).');
+}else{
+alert('Login admin gagal! Periksa kredensial Anda.');
+}
+}
+},
+
+handleFileUpload(e){
+const f=e.target.files[0];
+if(!f)return;
+const r=new FileReader();
+r.onload=async (ev)=>{
+const img=new Image();
+img.onload=async ()=>{
+const canvas=document.createElement('canvas');
+const ctx=canvas.getContext('2d');
+canvas.width=img.width;
+canvas.height=img.height;
+ctx.drawImage(img,0,0,img.width,img.height);
+const originalSize=canvas.toDataURL('image/jpeg',0.9).length;
+if(originalSize>100000){
+this.newTask.foto=await this.compressImageBase64(canvas.toDataURL('image/jpeg',0.9),50000);
+}else{
+this.newTask.foto=canvas.toDataURL('image/jpeg',0.9);
+}
+console.log(`Image compressed: ${originalSize} -> ${this.newTask.foto.length} bytes`);
+};
+img.src=ev.target.result;
+};
+r.readAsDataURL(f);
+},
+
+handleProfilePhotoUpload(e){
+const f=e.target.files[0];
+if(!f)return;
+const r=new FileReader();
+r.onload=ev=>{
+const img=new Image();
+img.onload=()=>{
+const canvas=document.createElement('canvas');
+const ctx=canvas.getContext('2d');
+
+// Set fixed size for profile photo (400x400)
+const targetSize=400;
+canvas.width=targetSize;
+canvas.height=targetSize;
+
+// Calculate aspect ratios
+const imgRatio=img.width/img.height;
+const targetRatio=1; // Square
+
+let drawWidth, drawHeight, offsetX, offsetY;
+
+if(imgRatio>targetRatio){
+// Image is wider than tall - fit to height
+  drawHeight=img.height;
+  drawWidth=drawHeight*targetRatio;
+  offsetX=(img.width-drawWidth)/2;
+  offsetY=0;
+}else{
+// Image is taller than wide - fit to width
+  drawWidth=img.width;
+  drawHeight=drawWidth/targetRatio;
+  offsetX=0;
+  offsetY=(img.height-drawHeight)/2;
+}
+
+// Clear canvas and draw centered image
+ctx.fillStyle='#f1f5f9';
+ctx.fillRect(0,0,targetSize,targetSize);
+ctx.drawImage(img,offsetX,offsetY,drawWidth,drawHeight,0,0,targetSize,targetSize);
+
+// Apply subtle sharpening filter for better quality
+ctx.filter='contrast(1.1) brightness(1.05)';
+ctx.drawImage(canvas,0,0);
+
+const finalPhoto=canvas.toDataURL('image/jpeg',0.95);
+this.authProfilePhoto=finalPhoto;
+this.newUserProfile.profile_photo=finalPhoto;
+};
+img.src=ev.target.result;
+};
+r.readAsDataURL(f);
+},
+
+async simpanTugas(){
+if(!this.newTask.masalah||!this.newTask.masalah.trim())return alert('Isi Permasalahan Utama!');
+if(!this.newTask.gedung)return alert('Pilih Gedung!');
+if(!this.newTask.ruangan)return alert('Pilih Ruangan!');
+const tindakan=this.newTask.statusPekerjaan==='Selesai'?this.newTask.penyelesaian:this.newTask.alasanPending;
+if(!tindakan||!tindakan.trim())return alert('Isi Penyelesaian atau Alasan Pending!');
+
+const entry={
+id:Date.now(),
+tanggal:dayjs().format('DD/MM/YYYY'),
+waktu:dayjs().format('HH:mm'),
+teknisi:this.currentUser.name,
+teknisi_id:this.currentUser.id,
+gedung:this.newTask.gedung,
+ruangan:this.newTask.ruangan,
+pelapor:this.newTask.pelapor||'',
+masalah:this.newTask.masalah,
+penyelesaian:this.newTask.statusPekerjaan==='Selesai'?this.newTask.penyelesaian:this.newTask.alasanPending,
+statusPekerjaan:this.newTask.statusPekerjaan,
+foto:this.newTask.foto||null,
+device_id:navigator.userAgent.includes('Mobile')?'mobile-'+Date.now():'desktop-'+Date.now(),
+device_info:{
+userAgent:navigator.userAgent,
+platform:navigator.platform,
+isMobile:navigator.userAgent.includes('Mobile')
+}
+};
+
+    try {
+        // Check internet connection for mobile
+        if(navigator.userAgent.includes('Mobile') && !navigator.onLine){
+            // Fallback to localStorage for offline mobile
+            this.savedTasks.unshift(entry);
+            await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
+            alert('Laporan tersimpan di perangkat (offline). Akan sinkronisasi saat online.');
+            this.resetTaskForm();
+            return;
+        }
+
+        // Mengirim data ke tabel 'tasks' di database Supabase
+        const { data, error } = await window.supabaseClient
+            .from('tasks') 
+            .insert([entry]);
+
+        if (error) {
+            // Fallback untuk mobile jika Supabase error
+            if(navigator.userAgent.includes('Mobile')){
+                this.savedTasks.unshift(entry);
+                await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
+                alert('Gagal menyimpan ke cloud. Laporan tersimpan di perangkat dan akan sinkronisasi nanti.');
+                this.resetTaskForm();
+                return;
+            }
+            throw error;
+        }
+
+        alert('Laporan berhasil disimpan ke Supabase!');
+        this.resetTaskForm();
+
+    } catch (err) {
+        console.error('Error:', err);
+        
+        // Mobile fallback
+        if(navigator.userAgent.includes('Mobile')){
+            this.savedTasks.unshift(entry);
+            await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
+            alert('Terjadi error. Laporan tersimpan di perangkat dan akan sinkronisasi nanti.');
+            this.resetTaskForm();
+            return;
+        }
+        
+        alert('Gagal menyimpan: ' + err.message);
+    }
+
+    // Refresh admin stats if Super Admin is logged in
+    if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
+        this.refreshAdminStats();
+    }
+},
+
+resetTaskForm(){
+    // Mengosongkan form kembali setelah berhasil
+    this.newTask = {
+        gedung: '', ruangan: '', pelapor: '', masalah: '', 
+        penyelesaian: '', statusPekerjaan: 'Selesai', 
+        alasanPending: '', foto: null
+    };
+    
+    // Memperbarui tampilan aplikasi
+    if (typeof this.initApp === 'function') this.initApp();
+},
+
+async exportToExcel(){
+if(this.filteredTasks.length===0)return alert('Tidak ada data untuk diexport');
+this.isExporting=true;
+try{
+const wb=new ExcelJS.Workbook();
+const ws=wb.addWorksheet('Laporan');
+ws.columns=[
+{header:'Tanggal',key:'tanggal',width:15},
+{header:'Waktu',key:'waktu',width:12},
+{header:'Nama Teknisi',key:'teknisi',width:20},
+{header:'Gedung',key:'gedung',width:20},
+{header:'Ruangan',key:'ruangan',width:25},
+{header:'Pelapor',key:'pelapor',width:20},
+{header:'Penyelesaian Masalah',key:'penyelesaian',width:40},
+{header:'Foto',key:'foto',width:20}
+];
+
+ws.getRow(1).font={bold:true};
+ws.getRow(1).height=20;
+
+for(let i=0;i<this.filteredTasks.length;i++){
+const task=this.filteredTasks[i];
+const row=ws.addRow({
+tanggal:task.tanggal,
+waktu:task.waktu,
+teknisi:task.teknisi,
+gedung:task.gedung,
+ruangan:task.ruangan,
+pelapor:task.pelapor||'-',
+penyelesaian:task.penyelesaian||'-',
+foto:task.foto?'Ada':'Tidak Ada'
+});
+
+row.height=task.foto?80:20;
+
+if(task.foto){
+try{
+let base64Data=task.foto;
+if(base64Data.includes(','))base64Data=base64Data.split(',')[1];
+const binaryString=atob(base64Data);
+const bytes=new Uint8Array(binaryString.length);
+for(let j=0;j<binaryString.length;j++)bytes[j]=binaryString.charCodeAt(j);
+const imageId=wb.addImage({buffer:bytes,extension:'jpeg'});
+ws.addImage(imageId,{tl:{col:7,row:i+2},ext:{width:120,height:90}});
+const fotoCell=row.getCell(8);
+fotoCell.alignment={vertical:'middle',horizontal:'center'};
+}catch(e){console.error('Error adding image:',e);}
+}
+}
+
+const buffer=await wb.xlsx.writeBuffer();
+const blob=new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+saveAs(blob,`Laporan_UPSRS_${dayjs().format('YYYYMMDD')}.xlsx`);
+}catch(e){
+alert('Gagal export: '+e.message);
+}finally{
+this.isExporting=false;
+}
+},
+
+logout(){
+localStorage.removeItem('upsrs_current_user');
+this.currentUser=null;
+this.page='login';
+},
+
+// Admin and User Management Functions
+get isAdmin(){
+return this.currentUser?.role==='admin';
+},
+
+get regularUsers(){
+// Force refresh from localStorage to get latest users
+const latestUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
+this.registeredUsers=latestUsers;
+return this.registeredUsers.filter(u=>u.role!=='admin');
+},
+
+getAllUserTasks(){
+const allTasks=[];
+this.regularUsers.forEach(user=>{
+const userTasks=this.savedTasks.filter(task=>task.teknisi===user.name);
+userTasks.forEach(task=>{
+allTasks.push({...task,userProfile:user.profile_photo,userRole:user.role});
+});
+});
+return allTasks.sort((a,b)=>{
+const dateA=dayjs(a.tanggal,'DD/MM/YYYY');
+const dateB=dayjs(b.tanggal,'DD/MM/YYYY');
+return dateB.isAfter(dateA)?1:-1;
+});
+},
+
+getAdminStats(){
+const allTasks=this.getAllUserTasks();
+const now=dayjs();
+return{
+totalTasks:allTasks.length,
+totalUsers:this.regularUsers.length,
+completedTasks:allTasks.filter(t=>t.statusPekerjaan==='Selesai').length,
+pendingTasks:allTasks.filter(t=>t.statusPekerjaan==='Belum Selesai').length,
+todayTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'day')).length,
+weeklyTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
+monthlyTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length,
+thisWeekCompleted:allTasks.filter(t=>t.statusPekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
+thisMonthCompleted:allTasks.filter(t=>t.statusPekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length
+};
+},
+
+// Force refresh admin stats
+refreshAdminStats(){
+// This function will be called to force reactivity
+return this.getAdminStats();
+},
+
+// Enhanced export for admin
+async exportAllTasksToExcel(){
+const allTasks=this.getAllUserTasks();
+if(allTasks.length===0)return alert('Tidak ada data untuk diexport');
+this.isExporting=true;
+try{
+const wb=new ExcelJS.Workbook();
+const ws=wb.addWorksheet('Semua Laporan User');
+ws.columns=[
+{header:'ID',key:'id',width:10},
+{header:'Tanggal',key:'tanggal',width:15},
+{header:'Waktu',key:'waktu',width:12},
+{header:'Teknisi',key:'teknisi',width:20},
+{header:'Gedung',key:'gedung',width:20},
+{header:'Ruangan',key:'ruangan',width:25},
+{header:'Pelapor',key:'pelapor',width:20},
+{header:'Permasalahan',key:'masalah',width:40},
+{header:'Penyelesaian',key:'penyelesaian',width:40},
+{header:'Status',key:'statusPekerjaan',width:15},
+{header:'Foto',key:'foto',width:20}
+];
+
+ws.getRow(1).font={bold:true};
+ws.getRow(1).height=20;
+
+for(let i=0;i<allTasks.length;i++){
+const task=allTasks[i];
+const row=ws.addRow({
+id:task.id,
+tanggal:task.tanggal,
+waktu:task.waktu,
+teknisi:task.teknisi,
+gedung:task.gedung,
+ruangan:task.ruangan,
+pelapor:task.pelapor||'-',
+masalah:task.masalah,
+penyelesaian:task.penyelesaian||'-',
+statusPekerjaan:task.statusPekerjaan,
+foto:task.foto?'Ada':'Tidak Ada'
+});
+
+row.height=task.foto?80:20;
+
+if(task.foto){
+try{
+let base64Data=task.foto;
+if(base64Data.includes(','))base64Data=base64Data.split(',')[1];
+const binaryString=atob(base64Data);
+const bytes=new Uint8Array(binaryString.length);
+for(let j=0;j<binaryString.length;j++)bytes[j]=binaryString.charCodeAt(j);
+const imageId=wb.addImage({buffer:bytes,extension:'jpeg'});
+ws.addImage(imageId,{tl:{col:10,row:i+2},ext:{width:120,height:90}});
+const fotoCell=row.getCell(11);
+fotoCell.alignment={vertical:'middle',horizontal:'center'};
+}catch(e){console.error('Error adding image:',e);}
+}
+}
+
+const buffer=await wb.xlsx.writeBuffer();
+const blob=new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+
+// Save locally first
+saveAs(blob,`Semua_Laporan_User_UPSRS_${dayjs().format('YYYYMMDD_HHmmss')}.xlsx`);
+
+// Then upload to Google Drive
+this.uploadToGoogleDrive(blob,`Semua_Laporan_User_UPSRS_${dayjs().format('YYYYMMDD_HHmmss')}.xlsx`);
+
+}catch(e){
+alert('Gagal export: '+e.message);
+}finally{
+this.isExporting=false;
+}
+},
+
+// Google Drive Upload Function
+async uploadToGoogleDrive(blob,filename){
+try{
+// Create a file input element to trigger download
+const file=new File([blob],filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+
+// Create a temporary download link
+const url=URL.createObjectURL(file);
+const a=document.createElement('a');
+a.href=url;
+a.download=filename;
+
+// Show instruction for Google Drive upload
+alert(`File Excel telah diunduh!\n\nUntuk upload ke Google Drive:\n1. Buka Google Drive (drive.google.com)\n2. Klik tombol "+ New"\n3. Pilih "File upload"\n4. Pilih file yang telah diunduh: ${filename}\n\nFile tersimpan di folder Downloads Anda.`);
+
+// Trigger download
+a.click();
+URL.revokeObjectURL(url);
+
+}catch(e){
+console.error('Upload error:',e);
+alert('Terjadi kesalahan saat upload ke Google Drive');
+}
+},
+
+// Edit pending task to completed
+editPendingTask(task){
+this.editingTask={
+...task,
+originalStatus:task.statusPekerjaan,
+originalPenyelesaian:task.penyelesaian,
+newPenyelesaian:task.statusPekerjaan==='Selesai'?task.penyelesaian:''
+};
+this.page='editPendingTask';
+},
+
+// Save edited pending task
+saveEditedTask(){
+if(!this.editingTask.newPenyelesaian||!this.editingTask.newPenyelesaian.trim()){
+return alert('Isi penyelesaian pekerjaan!');
+}
+
+const taskIndex=this.savedTasks.findIndex(t=>t.id===this.editingTask.id);
+if(taskIndex!==-1){
+this.savedTasks[taskIndex]={
+...this.savedTasks[taskIndex],
+statusPekerjaan:'Selesai',
+penyelesaian:this.editingTask.newPenyelesaian,
+waktuSelesai:dayjs().format('HH:mm'),
+tanggalSelesai:dayjs().format('DD/MM/YYYY')
+};
+localStorage.setItem('upsrs_tasks_v3',JSON.stringify(this.savedTasks));
+alert('Status pekerjaan berhasil diperbarui!');
+
+// Redirect based on user role
+if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
+this.page='userReports';
+}else{
+this.page='dashboard';
+}
+this.editingTask=null;
+}
+},
+
+// Get user reports for viewing
+getUserReports(userId){
+const user=this.registeredUsers.find(u=>u.id===userId);
+if(!user)return [];
+return this.savedTasks.filter(task=>task.teknisi===user.name).sort((a,b)=>{
+const dateA=dayjs(a.tanggal,'DD/MM/YYYY');
+const dateB=dayjs(b.tanggal,'DD/MM/YYYY');
+return dateB.isAfter(dateA)?1:-1;
+});
+},
+
+// Reset all user work
+resetAllUserWork(){
+if(!confirm('Apakah Anda yakin ingin menghapus SEMUA pekerjaan user? Tindakan ini tidak dapat dibatalkan!'))return;
+this.savedTasks=[];
+localStorage.setItem('upsrs_tasks_v3',JSON.stringify(this.savedTasks));
+alert('Semua pekerjaan user telah direset!');
+},
+
+// Reset all accounts (keep only Super Admin)
+resetAllAccounts(){
+if(!confirm('Apakah Anda yakin ingin menghapus SEMUA akun user? Hanya Super Admin yang akan tersisa! Tindakan ini tidak dapat dibatalkan!'))return;
+this.registeredUsers=this.registeredUsers.filter(u=>u.username==='Admin');
+localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
+alert('Semua akun user telah direset! Hanya Super Admin yang tersisa.');
+},
+
+// Edit user credentials
+editUserCredentials(userId){
+const user=this.registeredUsers.find(u=>u.id===userId);
+if(!user)return;
+
+const newUsername=prompt('Username baru:',user.username);
+const newPassword=prompt('Password baru:',user.password);
+
+if(newUsername && newPassword){
+const userIndex=this.registeredUsers.findIndex(u=>u.id===userId);
+if(userIndex!==-1){
+this.registeredUsers[userIndex]={
+...this.registeredUsers[userIndex],
+username:newUsername,
+password:newPassword
+};
+localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
+alert('Kredensial user berhasil diperbarui!');
+}
+}
+},
+
+// Refresh user list for Super Admin
+refreshUserList(){
+this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
+alert('Daftar user berhasil diperbarui!');
+},
+
+// View user profile with all tasks
+viewUserProfileWithTasks(user){
+this.viewingUser=user;
+this.editingUserProfile={
+...user,
+newName:user.name,
+newUsername:user.username,
+newPassword:user.password,
+newSpecialization:user.specialization||''
+};
+this.page='userProfileWithTasks';
+},
+
+// Save edited user profile
+saveEditedUserProfile(){
+if(!this.editingUserProfile.newName||!this.editingUserProfile.newUsername||!this.editingUserProfile.newPassword){
+return alert('Lengkapi semua data profil!');
+}
+
+const userIndex=this.registeredUsers.findIndex(u=>u.id===this.viewingUser.id);
+if(userIndex!==-1){
+this.registeredUsers[userIndex]={
+...this.registeredUsers[userIndex],
+name:this.editingUserProfile.newName,
+username:this.editingUserProfile.newUsername,
+password:this.editingUserProfile.newPassword,
+specialization:this.editingUserProfile.newSpecialization
+};
+
+// Update localStorage
+localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
+
+// Update viewingUser
+this.viewingUser=this.registeredUsers[userIndex];
+
+alert('Profil user berhasil diperbarui!');
+}
+},
+
+// Get all tasks for a specific user (both pending and completed)
+getUserAllTasks(userId){
+const user=this.registeredUsers.find(u=>u.id===userId);
+if(!user)return [];
+return this.savedTasks.filter(task=>task.teknisi===user.name).sort((a,b)=>{
+const dateA=dayjs(a.tanggal,'DD/MM/YYYY');
+const dateB=dayjs(b.tanggal,'DD/MM/YYYY');
+return dateB.isAfter(dateA)?1:-1;
+});
+},
+
+deleteUser(userId){
+if(!confirm('Apakah Anda yakin ingin menghapus user ini? Semua laporan user ini juga akan dihapus! Tindakan ini tidak dapat dibatalkan!'))return;
+
+// Get user info before deletion
+const user=this.registeredUsers.find(u=>u.id===userId);
+if(!user)return;
+
+// Remove user from registered users
+this.registeredUsers=this.registeredUsers.filter(u=>u.id!==userId);
+
+// Remove all tasks associated with this user
+this.savedTasks=this.savedTasks.filter(task=>task.teknisi!==user.name);
+
+// Update localStorage
+localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
+localStorage.setItem('upsrs_tasks_v3',JSON.stringify(this.savedTasks));
+
+alert(`User "${user.name}" dan semua laporannya berhasil dihapus!`);
+},
+
+// WhatsApp Share Function
+shareToWhatsApp(task){
+let message=`🔧 *LAPORAN PEKERJAAN UPSRS*\n\n`;
+message+=`📅 *Tanggal:* ${task.tanggal} ${task.waktu}\n`;
+message+=`👤 *Teknisi:* ${task.teknisi}\n`;
+message+=`🏢 *Lokasi:* ${task.gedung} - ${task.ruangan}\n`;
+message+=`📋 *Pelapor:* ${task.pelapor||'-'}\n\n`;
+message+=`❌ *PERMASALAHAN:*\n${task.masalah}\n\n`;
+
+// Always show status information - both original and current if available
+if(task.tanggalSelesai && task.waktuSelesai && task.originalStatus === 'Belum Selesai'){
+// Task was edited from pending to completed - show BOTH statuses completely
+message+=`⚠️ *STATUS AWAL: BELUM SELESAI*\n`;
+message+=`📝 *Alasan Pending (Lama):*\n${task.originalPenyelesaian}\n\n`;
+message+=`📅 *Waktu Pending:* ${task.tanggal} ${task.waktu}\n\n`;
+message+=`✅ *STATUS SEKARANG: SELESAI*\n`;
+message+=`📝 *Penyelesaian:*\n${task.penyelesaian}\n\n`;
+message+=`📅 *Waktu Selesai:* ${task.tanggalSelesai} ${task.waktuSelesai}\n`;
+}else if(task.statusPekerjaan === 'Belum Selesai'){
+// Task is still pending
+message+=`⚠️ *STATUS:* Belum Selesai\n`;
+message+=`📝 *Alasan Pending:* ${task.penyelesaian}\n`;
+message+=`📅 *Waktu:* ${task.tanggal} ${task.waktu}\n`;
+}else{
+// Task was originally completed (no status change)
+message+=`✅ *STATUS:* Selesai\n`;
+message+=`📝 *Penyelesaian:* ${task.penyelesaian}\n`;
+message+=`📅 *Waktu:* ${task.tanggal} ${task.waktu}\n`;
+}
+
+message+=`\n📸 *Foto:* ${task.foto?'Ada':'Tidak ada'}`;
+
+const whatsappUrl=`https://wa.me/?text=${encodeURIComponent(message)}`;
+window.open(whatsappUrl,'_blank');
+},
+
+// Profile Management
+updateProfile(){
+if(!this.newUserProfile.name||!this.newUserProfile.username||!this.newUserProfile.password){
+return alert('Lengkapi semua data!');
+}
+
+const userIndex=this.registeredUsers.findIndex(u=>u.id===this.currentUser.id);
+if(userIndex!==-1){
+this.registeredUsers[userIndex]={
+...this.registeredUsers[userIndex],
+name:this.newUserProfile.name,
+username:this.newUserProfile.username,
+password:this.newUserProfile.password,
+profile_photo:this.newUserProfile.profile_photo
+};
+
+localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
+localStorage.setItem('upsrs_current_user',JSON.stringify(this.registeredUsers[userIndex]));
+this.currentUser=this.registeredUsers[userIndex];
+alert('Profil berhasil diperbarui!');
+this.page='dashboard';
+}
+}
+}}
+</script>
+</head>
+
+<body x-data="appData()" x-init="initApp()" x-cloak class="antialiased">
+
+<!-- LOGIN -->
+<div x-show="page==='login'" class="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+<div class="bg-white p-8 rounded-3xl w-full max-w-sm shadow-xl border border-slate-100">
+<div class="text-center mb-6">
+<h1 class="text-3xl font-black text-slate-800">UPSRS <span class="text-blue-600">GO!</span></h1>
+<p class="text-xs text-slate-400 uppercase tracking-wider">Maintenance System</p>
+</div>
+<div class="space-y-4">
+<input x-model="authUsername" type="text" class="input-style" placeholder="Username">
+<div class="relative">
+<input x-model="authPassword" :type="showPass?'text':'password'" class="input-style pr-12" placeholder="Password">
+<button @click="showPass=!showPass" class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+</button>
+</div>
+<button @click="handleLogin" class="w-full bg-blue-600 text-white py-4 rounded-xl font-bold hover:bg-blue-700 transition">MASUK</button>
+<button @click="page='adminLogin'" class="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 transition mt-2">MASUK SEBAGAI ADMIN</button>
+<button @click="page='register'" class="w-full text-xs text-slate-500 mt-3 hover:text-blue-600">Belum punya akun? Daftar</button>
+</div>
+</div>
+</div>
+
+<!-- REGISTER -->
+<div x-show="page==='register'" class="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+<div class="bg-white p-8 rounded-3xl w-full max-w-sm shadow-xl border border-slate-100">
+<div class="text-center mb-6">
+<h1 class="text-3xl font-black text-slate-800">UPSRS <span class="text-blue-600">GO!</span></h1>
+<p class="text-xs text-slate-400 uppercase tracking-wider">Daftar Akun Baru</p>
+</div>
+<div class="mb-4">
+<input x-model="authName" type="text" class="input-style" placeholder="Nama Lengkap">
+</div>
+<div class="mb-4">
+<input x-model="authUsername" type="text" class="input-style" placeholder="Username">
+</div>
+<div class="mb-4">
+<input x-model="authSpecialization" type="text" class="input-style" placeholder="Bidang/Bagian Teknisi (opsional)">
+</div>
+<div class="relative mb-4">
+<input x-model="authPassword" :type="showPass?'text':'password'" class="input-style pr-12" placeholder="Password">
+<button @click="showPass=!showPass" class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+</button>
+</div>
+<div class="mb-4">
+<label class="block text-xs font-bold text-slate-600 mb-2">Foto Profil (opsional)</label>
+<label class="block w-full h-24 bg-slate-50 rounded-xl border-2 border-dashed border-slate-300 flex items-center justify-center cursor-pointer overflow-hidden">
+<template x-if="!authProfilePhoto">
+<div class="text-center">
+<svg class="w-8 h-8 mx-auto text-slate-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+<p class="text-xs text-slate-500">Klik untuk upload foto</p>
+</div>
+</template>
+<template x-if="authProfilePhoto">
+<img :src="authProfilePhoto" class="w-full h-full object-cover">
+</template>
+<input type="file" accept="image/*" class="hidden" @change="handleProfilePhotoUpload">
+</label>
+</div>
+<button @click="handleRegister" class="w-full bg-blue-600 text-white py-4 rounded-xl font-bold hover:bg-blue-700 transition">DAFTAR</button>
+<button @click="page='adminLogin'" class="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 transition mt-2">MASUK SEBAGAI ADMIN</button>
+<button @click="page='login'" class="w-full text-xs text-slate-500 mt-3 hover:text-blue-600">Sudah punya akun? Login</button>
+</div>
+</div>
+</div>
+
+<!-- ADMIN LOGIN -->
+<div x-show="page==='adminLogin'" class="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+<div class="bg-white p-8 rounded-3xl w-full max-w-sm shadow-xl border border-slate-100">
+<div class="text-center mb-6">
+<h1 class="text-3xl font-black text-purple-800">UPSRS <span class="text-purple-600">ADMIN</span></h1>
+<p class="text-xs text-slate-400 uppercase tracking-wider">Administrator Login</p>
+</div>
+<div class="space-y-4">
+<input x-model="authUsername" type="text" class="input-style" placeholder="Admin Username">
+<div class="relative">
+<input x-model="authPassword" :type="showPass?'text':'password'" class="input-style pr-12" placeholder="Admin Password">
+<button @click="showPass=!showPass" class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+</button>
+</div>
+<button @click="handleAdminLogin" class="w-full bg-purple-600 text-white py-4 rounded-xl font-bold hover:bg-purple-700 transition">MASUK ADMIN</button>
+<button @click="page='login'" class="w-full text-xs text-slate-500 mt-3 hover:text-purple-600">Kembali ke Login User</button>
+</div>
+</div>
+</div>
+
+<!-- DASHBOARD -->
+<div x-show="page==='dashboard'" class="max-w-md mx-auto p-4 pb-24">
+<!-- Header -->
+<div class="flex justify-between items-center mb-6 bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+<div class="flex items-center gap-3">
+<div class="w-12 h-12 bg-slate-100 rounded-full overflow-hidden">
+<template x-if="currentUser?.profile_photo"><img :src="currentUser.profile_photo" class="w-full h-full object-cover"></template>
+<template x-if="!currentUser?.profile_photo"><div class="w-full h-full flex items-center justify-center text-slate-400 text-xs">No Photo</div></template>
+</div>
+<div>
+<h2 class="font-black text-lg" x-text="currentUser?.name"></h2>
+<p class="text-xs text-slate-400" x-text="isAdmin?'Administrator':'Teknisi Lapangan'"></p>
+</div>
+</div>
+<div class="flex gap-2">
+<button @click="viewUserProfile(currentUser)" class="px-3 py-2 bg-blue-100 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-200">Profil</button>
+<template x-if="isAdmin">
+<button @click="page='admin'" class="px-3 py-2 bg-purple-100 text-purple-600 rounded-xl text-sm font-bold hover:bg-purple-200">Admin</button>
+</template>
+<button @click="logout" class="px-4 py-2 bg-red-100 text-red-600 rounded-xl text-sm font-bold hover:bg-red-200">Logout</button>
+</div>
+</div>
+
+<!-- Stats -->
+<div class="bg-white p-5 rounded-2xl mb-6 shadow-sm border border-slate-100">
+<div class="flex gap-2 mb-4 p-1 bg-slate-50 rounded-xl">
+<button @click="filterPeriod='all'" :class="filterPeriod==='all'?'bg-white shadow text-blue-600':'text-slate-400'" class="flex-1 py-2 rounded-lg text-xs font-bold">Semua</button>
+<button @click="filterPeriod='today'" :class="filterPeriod==='today'?'bg-white shadow text-blue-600':'text-slate-400'" class="flex-1 py-2 rounded-lg text-xs font-bold">Hari</button>
+<button @click="filterPeriod='week'" :class="filterPeriod==='week'?'bg-white shadow text-blue-600':'text-slate-400'" class="flex-1 py-2 rounded-lg text-xs font-bold">Minggu</button>
+<button @click="filterPeriod='month'" :class="filterPeriod==='month'?'bg-white shadow text-blue-600':'text-slate-400'" class="flex-1 py-2 rounded-lg text-xs font-bold">Bulan</button>
+</div>
+<div class="grid grid-cols-3 gap-4 text-center">
+<div>
+<p class="text-2xl font-black text-slate-800" x-text="stats.total"></p>
+<p class="text-xs text-slate-400 uppercase">Total</p>
+</div>
+<div>
+<p class="text-2xl font-black text-emerald-600" x-text="stats.selesai"></p>
+<p class="text-xs text-slate-400 uppercase">Selesai</p>
+</div>
+<div>
+<p class="text-2xl font-black text-orange-600" x-text="stats.pending"></p>
+<p class="text-xs text-slate-400 uppercase">Pending</p>
+</div>
+</div>
+</div>
+
+<!-- Form Input Laporan -->
+<div class="bg-white p-6 rounded-2xl mb-6 shadow-sm border border-slate-100">
+<h3 class="font-black text-sm mb-4 text-slate-800">Input Laporan Baru</h3>
+
+<!-- Fitur 1: Nama Pengguna & Permasalahan Utama -->
+<div class="mb-4">
+<label class="block text-xs font-bold text-slate-600 mb-2">Nama Pengguna</label>
+<input type="text" :value="currentUser?.name" class="input-style bg-slate-100" disabled>
+</div>
+
+<div class="mb-4">
+<label class="block text-xs font-bold text-slate-600 mb-2">Permasalahan Utama <span class="text-red-500">*</span></label>
+<textarea x-model="newTask.masalah" class="input-style" placeholder="Masukkan masalah atau kerusakan yang ada di dalam ruangan..."></textarea>
+</div>
+
+<!-- Fitur 2: Gedung & Ruangan -->
+<div class="mb-4">
+<label class="block text-xs font-bold text-slate-600 mb-2">Gedung <span class="text-red-500">*</span></label>
+<select x-model="newTask.gedung" class="input-style" @change="newTask.ruangan=''">
+<option value="">-- Pilih Gedung --</option>
+<template x-for="(rooms,gedung) in dataLokasi">
+<option :value="gedung" x-text="gedung"></option>
+</template>
+</select>
+</div>
+
+<div class="mb-4" x-show="newTask.gedung">
+<label class="block text-xs font-bold text-slate-600 mb-2">Ruangan <span class="text-red-500">*</span></label>
+<select x-model="newTask.ruangan" class="input-style" :disabled="!newTask.gedung">
+<option value="">-- Pilih Ruangan --</option>
+<template x-for="r in (dataLokasi[newTask.gedung]||[])">
+<option :value="r" x-text="r"></option>
+</template>
+</select>
+</div>
+
+<div class="mb-4">
+<label class="block text-xs font-bold text-slate-600 mb-2">Nama Pelapor</label>
+<input x-model="newTask.pelapor" type="text" class="input-style" placeholder="Nama pelapor (opsional)">
+</div>
+
+<!-- Fitur 3: Penyelesaian & Status & Foto -->
+<div class="mb-4">
+<label class="block text-xs font-bold text-slate-600 mb-2">Status Pekerjaan <span class="text-red-500">*</span></label>
+<div class="flex gap-2">
+<button @click="newTask.statusPekerjaan='Selesai'" :class="newTask.statusPekerjaan==='Selesai'?'bg-emerald-600 text-white':'bg-slate-100'" class="flex-1 py-3 rounded-xl font-bold text-sm">Selesai</button>
+<button @click="newTask.statusPekerjaan='Belum Selesai'" :class="newTask.statusPekerjaan==='Belum Selesai'?'bg-orange-500 text-white':'bg-slate-100'" class="flex-1 py-3 rounded-xl font-bold text-sm">Pending</button>
+</div>
+</div>
+
+<div class="mb-4" x-show="newTask.statusPekerjaan==='Selesai'">
+<label class="block text-xs font-bold text-slate-600 mb-2">Penyelesaian <span class="text-red-500">*</span></label>
+<textarea x-model="newTask.penyelesaian" class="input-style" placeholder="Tuliskan penyelesaian masalah yang telah dilakukan..."></textarea>
+</div>
+
+<div class="mb-4" x-show="newTask.statusPekerjaan==='Belum Selesai'">
+<label class="block text-xs font-bold text-slate-600 mb-2">Alasan Pending / Tidak Bisa Diselesaikan <span class="text-red-500">*</span></label>
+<textarea x-model="newTask.alasanPending" class="input-style" placeholder="Tuliskan alasan mengapa pekerjaan belum bisa diselesaikan..."></textarea>
+</div>
+
+<div class="mb-4">
+<label class="block text-xs font-bold text-slate-600 mb-2">Foto Hasil Pekerjaan</label>
+<label class="block w-full h-32 bg-slate-50 rounded-xl border-2 border-dashed border-slate-300 flex items-center justify-center cursor-pointer overflow-hidden">
+<template x-if="!newTask.foto">
+<div class="text-center">
+<svg class="w-10 h-10 mx-auto text-slate-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+<p class="text-xs text-slate-500">Klik untuk upload foto</p>
+</div>
+</template>
+<template x-if="newTask.foto">
+<img :src="newTask.foto" class="w-full h-full object-cover">
+</template>
+<input type="file" accept="image/*" class="hidden" @change="handleFileUpload">
+</label>
+</div>
+
+<!-- Fitur 4: Tombol Simpan -->
+<button @click="simpanTugas" class="w-full bg-blue-600 text-white py-4 rounded-xl font-bold hover:bg-blue-700 transition">SIMPAN LAPORAN</button>
+</div>
+
+<!-- Fitur 5: Export Excel -->
+<div class="mb-6">
+<button @click="exportToExcel" :disabled="isExporting" class="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 disabled:opacity-50">
+<span x-text="isExporting?'Mengekspor...':'EXPORT KE EXCEL'"></span>
+</button>
+</div>
+
+<!-- Daftar Laporan -->
+<div class="space-y-3">
+<h3 class="font-black text-sm text-slate-700 mb-3">Riwayat Laporan</h3>
+<template x-for="task in filteredTasks" :key="task.id">
+<div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition">
+<div @click="viewingTask=task" class="flex items-start gap-4 cursor-pointer">
+<div class="w-16 h-16 bg-slate-100 rounded-xl overflow-hidden shrink-0">
+<template x-if="task.foto"><img :src="task.foto" class="w-full h-full object-cover"></template>
+<template x-if="!task.foto"><div class="w-full h-full flex items-center justify-center text-slate-300 text-xs">No Image</div></template>
+</div>
+<div class="flex-1">
+<h4 class="font-bold text-sm text-slate-800" x-text="task.ruangan"></h4>
+<p class="text-xs text-slate-500 mb-1" x-text="task.gedung"></p>
+<p class="text-xs text-slate-400" x-text="`${task.tanggal} ${task.waktu}`"></p>
+<div class="mt-2">
+<span :class="task.statusPekerjaan==='Selesai'?'bg-emerald-100 text-emerald-700':'bg-orange-100 text-orange-700'" class="px-2 py-1 rounded text-xs font-bold" x-text="task.statusPekerjaan"></span>
+</div>
+</div>
+</div>
+<div class="mt-3 flex gap-2">
+<button @click="shareToWhatsApp(task)" class="flex-1 bg-green-500 text-white py-2 rounded-lg text-xs font-bold hover:bg-green-600 transition flex items-center justify-center gap-1">
+<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/></svg>
+Share WhatsApp
+</button>
+<template x-if="task.statusPekerjaan==='Belum Selesai'">
+<button @click="editPendingTask(task)" class="flex-1 bg-emerald-500 text-white py-2 rounded-lg text-xs font-bold hover:bg-emerald-600 transition">Edit Selesai</button>
+</template>
+</div>
+</div>
+</template>
+<div x-show="filteredTasks.length===0" class="text-center py-10">
+<p class="text-sm text-slate-400">Belum ada laporan</p>
+</div>
+</div>
+</div>
+
+<!-- Modal Detail Laporan -->
+<div x-show="viewingTask" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60" @click.away="viewingTask=null">
+<div class="bg-white w-full max-w-md rounded-2xl overflow-hidden shadow-2xl" @click.stop>
+<div class="h-64 bg-slate-100 relative">
+<template x-if="viewingTask?.foto"><img :src="viewingTask.foto" class="w-full h-full object-cover"></template>
+<template x-if="!viewingTask?.foto"><div class="w-full h-full flex items-center justify-center text-slate-300 font-bold">No Image</div></template>
+<div class="absolute top-4 right-4">
+<span :class="viewingTask?.statusPekerjaan==='Selesai'?'bg-emerald-500':'bg-orange-500'" class="px-3 py-1 rounded-full text-xs font-black text-white" x-text="viewingTask?.statusPekerjaan"></span>
+</div>
+</div>
+<div class="p-6">
+<h3 class="text-xl font-black text-slate-800 mb-2" x-text="viewingTask?.ruangan"></h3>
+<p class="text-xs text-blue-600 font-bold mb-4" x-text="viewingTask?.gedung"></p>
+<div class="space-y-3 mb-6">
+<div class="bg-slate-50 p-3 rounded-xl">
+<p class="text-xs text-slate-500 mb-1"><strong>Teknisi:</strong> <span x-text="viewingTask?.teknisi"></span></p>
+<p class="text-xs text-slate-500 mb-1"><strong>Pelapor:</strong> <span x-text="viewingTask?.pelapor||'-'"></span></p>
+<p class="text-xs text-slate-500"><strong>Waktu:</strong> <span x-text="`${viewingTask?.tanggal} ${viewingTask?.waktu}`"></span></p>
+</div>
+<div class="bg-slate-50 p-3 rounded-xl">
+<p class="text-xs font-bold text-slate-600 mb-1">Permasalahan:</p>
+<p class="text-sm text-slate-800" x-text="viewingTask?.masalah"></p>
+</div>
+<div class="bg-blue-50 p-3 rounded-xl border border-blue-100">
+<p class="text-xs font-bold text-blue-600 mb-1">Penyelesaian:</p>
+<p class="text-sm text-blue-800" x-text="viewingTask?.penyelesaian"></p>
+</div>
+</div>
+<button @click="viewingTask=null" class="w-full bg-slate-100 text-slate-700 py-3 rounded-xl font-bold hover:bg-slate-200">TUTUP</button>
+</div>
+</div>
+</div>
+
+<!-- PROFILE PAGE -->
+<div x-show="page==='profile'" class="min-h-screen bg-slate-50 p-4">
+<div class="max-w-md mx-auto">
+<div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100 mb-4">
+<div class="flex items-center justify-between mb-6">
+<h2 class="text-xl font-black text-slate-800">Profil Pengguna</h2>
+<button @click="page='dashboard'" class="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-200">Kembali</button>
+</div>
+
+<div class="text-center mb-6">
+<div class="w-24 h-24 bg-slate-100 rounded-full overflow-hidden mx-auto mb-4">
+<template x-if="viewingUser?.profile_photo"><img :src="viewingUser.profile_photo" class="w-full h-full object-cover"></template>
+<template x-if="!viewingUser?.profile_photo"><div class="w-full h-full flex items-center justify-center text-slate-400 text-2xl">👤</div></template>
+</div>
+<h3 class="text-lg font-black text-slate-800" x-text="viewingUser?.name"></h3>
+<p class="text-sm text-slate-500" x-text="viewingUser?.role==='admin'?'Administrator':'Teknisi Lapangan'"></p>
+</div>
+
+<div class="space-y-4">
+<div class="bg-slate-50 p-4 rounded-xl">
+<p class="text-xs font-bold text-slate-600 mb-1">Username</p>
+<p class="text-sm text-slate-800" x-text="viewingUser?.username"></p>
+</div>
+<div class="bg-slate-50 p-4 rounded-xl">
+<p class="text-xs font-bold text-slate-600 mb-1">Password</p>
+<p class="text-sm text-slate-800" x-text="viewingUser?.password"></p>
+</div>
+<div class="bg-slate-50 p-4 rounded-xl">
+<p class="text-xs font-bold text-slate-600 mb-1">User ID</p>
+<p class="text-sm text-slate-800" x-text="viewingUser?.id"></p>
+</div>
+</div>
+
+<template x-if="viewingUser?.id===currentUser?.id">
+<div class="mt-6">
+<button @click="newUserProfile={name:viewingUser.name,username:viewingUser.username,password:viewingUser.password,profile_photo:viewingUser.profile_photo};page='editProfile'" class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition">Edit Profil</button>
+</div>
+</template>
+</div>
+</div>
+</div>
+
+<!-- EDIT PROFILE PAGE -->
+<div x-show="page==='editProfile'" class="min-h-screen bg-slate-50 p-4">
+<div class="max-w-md mx-auto">
+<div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
+<div class="flex items-center justify-between mb-6">
+<h2 class="text-xl font-black text-slate-800">Edit Profil</h2>
+<button @click="page='profile'" class="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-200">Batal</button>
+</div>
+
+<div class="space-y-4">
+<div>
+<label class="block text-xs font-bold text-slate-600 mb-2">Nama Lengkap</label>
+<input x-model="newUserProfile.name" type="text" class="input-style" placeholder="Nama Lengkap">
+</div>
+<div>
+<label class="block text-xs font-bold text-slate-600 mb-2">Username</label>
+<input x-model="newUserProfile.username" type="text" class="input-style" placeholder="Username">
+</div>
+<div>
+<label class="block text-xs font-bold text-slate-600 mb-2">Password</label>
+<input x-model="newUserProfile.password" type="password" class="input-style" placeholder="Password">
+</div>
+<div>
+<label class="block text-xs font-bold text-slate-600 mb-2">Foto Profil</label>
+<label class="block w-full h-24 bg-slate-50 rounded-xl border-2 border-dashed border-slate-300 flex items-center justify-center cursor-pointer overflow-hidden">
+<template x-if="!newUserProfile.profile_photo">
+<div class="text-center">
+<svg class="w-8 h-8 mx-auto text-slate-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+<p class="text-xs text-slate-500">Klik untuk upload foto</p>
+</div>
+</template>
+<template x-if="newUserProfile.profile_photo">
+<img :src="newUserProfile.profile_photo" class="w-full h-full object-cover">
+</template>
+<input type="file" accept="image/*" class="hidden" @change="handleProfilePhotoUpload">
+</label>
+</div>
+<button @click="updateProfile" class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition">Simpan Perubahan</button>
+</div>
+</div>
+</div>
+</div>
+
+<!-- ADMIN PAGE -->
+<div x-show="page==='admin'" class="min-h-screen bg-slate-50 p-4">
+<div class="max-w-md mx-auto">
+<div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100 mb-4">
+<div class="flex items-center justify-between mb-6">
+<h2 class="text-xl font-black text-slate-800">Manajemen User</h2>
+<button @click="page='dashboard'" class="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-200">Kembali</button>
+</div>
+
+<div class="mb-6">
+<div class="bg-purple-50 p-4 rounded-xl border border-purple-100">
+<p class="text-sm font-bold text-purple-800">Total User Terdaftar: <span x-text="regularUsers.length"></span></p>
+</div>
+</div>
+
+<div class="space-y-3">
+<template x-for="user in regularUsers" :key="user.id">
+<div class="bg-slate-50 p-4 rounded-xl">
+<div class="flex items-center gap-3">
+<div class="w-12 h-12 bg-slate-200 rounded-full overflow-hidden">
+<template x-if="user.profile_photo"><img :src="user.profile_photo" class="w-full h-full object-cover"></template>
+<template x-if="!user.profile_photo"><div class="w-full h-full flex items-center justify-center text-slate-400 text-xs">👤</div></template>
+</div>
+<div class="flex-1">
+<h4 class="font-bold text-sm text-slate-800" x-text="user.name"></h4>
+<p class="text-xs text-slate-500" x-text="user.username"></p>
+</div>
+<div class="flex gap-2">
+<button @click="viewUserProfile(user)" class="px-3 py-1 bg-blue-100 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-200">Lihat</button>
+<button @click="deleteUser(user.id)" class="px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs font-bold hover:bg-red-200">Hapus</button>
+</div>
+</div>
+</div>
+</template>
+<div x-show="regularUsers.length===0" class="text-center py-10">
+<p class="text-sm text-slate-400">Belum ada user terdaftar</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+<!-- ADMIN DASHBOARD -->
+<div x-show="page==='adminDashboard'" class="min-h-screen bg-slate-50 p-4">
+<div class="max-w-6xl mx-auto">
+<!-- Header -->
+<div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100 mb-6">
+<div class="flex items-center justify-between mb-4">
+<div class="flex items-center gap-3">
+<div class="w-12 h-12 bg-purple-100 rounded-full overflow-hidden">
+<template x-if="currentUser?.profile_photo"><img :src="currentUser.profile_photo" class="w-full h-full object-cover"></template>
+<template x-if="!currentUser?.profile_photo"><div class="w-full h-full flex items-center justify-center text-purple-400 text-xs">👤</div></template>
+</div>
+<div>
+<h2 class="text-xl font-black text-purple-800">Super Admin Dashboard</h2>
+<p class="text-sm text-slate-500">Kelola Semua User Terdaftar</p>
+</div>
+</div>
+<div class="flex gap-2">
+<button @click="logout" class="px-4 py-2 bg-red-100 text-red-600 rounded-xl text-sm font-bold hover:bg-red-200">Logout</button>
+</div>
+</div>
+
+<!-- Data Statistik -->
+<div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100 mb-6">
+<h3 class="text-lg font-black text-slate-800 mb-4">Data Statistik</h3>
+<div class="grid grid-cols-3 gap-4">
+<div class="text-center">
+<h4 class="text-sm font-bold text-purple-600 mb-2">Harian</h4>
+<div class="bg-purple-50 p-4 rounded-xl">
+<p class="text-xl font-black text-purple-800" x-text="adminStats.todayTasks"></p>
+<p class="text-xs text-purple-500">Hari Ini</p>
+</div>
+</div>
+<div class="text-center">
+<h4 class="text-sm font-bold text-blue-600 mb-2">Mingguan</h4>
+<div class="bg-blue-50 p-4 rounded-xl">
+<p class="text-xl font-black text-blue-800" x-text="adminStats.weeklyTasks"></p>
+<p class="text-xs text-blue-500">7 Hari Terakhir</p>
+<p class="text-xs text-blue-400 mt-1">Selesai: <span x-text="adminStats.thisWeekCompleted"></span></p>
+</div>
+</div>
+<div class="text-center">
+<h4 class="text-sm font-bold text-emerald-600 mb-2">Bulanan</h4>
+<div class="bg-emerald-50 p-4 rounded-xl">
+<p class="text-xl font-black text-emerald-800" x-text="adminStats.monthlyTasks"></p>
+<p class="text-xs text-emerald-500">Bulan Ini</p>
+<p class="text-xs text-emerald-400 mt-1">Selesai: <span x-text="adminStats.thisMonthCompleted"></span></p>
+</div>
+</div>
+</div>
+</div>
+
+<!-- Export Excel -->
+<div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100 mb-6">
+<h3 class="text-lg font-black text-slate-800 mb-4">Export Excel Data Keseluruhan</h3>
+<button @click="exportAllTasksToExcel" :disabled="isExporting" class="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 disabled:opacity-50 transition">
+<span x-text="isExporting?'Mengekspor...':'EXPORT EXCEL DATA KESELURUHAN USER'"></span>
+</button>
+</div>
+
+<!-- User Management -->
+<div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
+<div class="flex items-center justify-between mb-4">
+<h3 class="text-lg font-black text-slate-800">Kelola User Terdaftar</h3>
+<button @click="refreshUserList" class="px-4 py-2 bg-blue-100 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-200">🔄 Refresh</button>
+</div>
+<div class="space-y-4">
+<template x-for="user in regularUsers" :key="user.id">
+<div class="bg-slate-50 p-4 rounded-xl hover:bg-slate-100 transition cursor-pointer" @click="viewUserProfileWithTasks(user)">
+<div class="flex items-center gap-4 mb-3">
+<div class="w-12 h-12 bg-slate-200 rounded-full overflow-hidden">
+<template x-if="user.profile_photo"><img :src="user.profile_photo" class="w-full h-full object-cover"></template>
+<template x-if="!user.profile_photo"><div class="w-full h-full flex items-center justify-center text-slate-400 text-xs">👤</div></template>
+</div>
+<div class="flex-1">
+<h4 class="font-bold text-slate-800" x-text="user.name"></h4>
+<p class="text-sm text-slate-500" x-text="user.username"></p>
+<p class="text-xs text-blue-500 mt-1">Klik untuk lihat profil & semua laporan</p>
+</div>
+<div class="flex gap-2">
+<button @click.stop="editUserCredentials(user.id)" class="px-3 py-1 bg-blue-100 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-200">Edit Password</button>
+<button @click.stop="deleteUser(user.id)" class="px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs font-bold hover:bg-red-200">Hapus</button>
+</div>
+</div>
+
+<div class="grid grid-cols-3 gap-3 text-center">
+<div class="bg-blue-50 p-3 rounded-xl">
+<p class="text-lg font-black text-blue-600" x-text="safeGetUserStats(user.id).totalTasks"></p>
+<p class="text-xs text-blue-500">Total Pekerjaan</p>
+</div>
+<div class="bg-emerald-50 p-3 rounded-xl">
+<p class="text-lg font-black text-emerald-600" x-text="safeGetUserStats(user.id).completedTasks"></p>
+<p class="text-xs text-emerald-500">Selesai</p>
+</div>
+<div class="bg-orange-50 p-3 rounded-xl">
+<p class="text-lg font-black text-orange-600" x-text="safeGetUserStats(user.id).pendingTasks"></p>
+<p class="text-xs text-orange-500">Pending</p>
+</div>
+</div>
+</div>
+</template>
+<div x-show="regularUsers.length===0" class="text-center py-10">
+<p class="text-sm text-slate-400">Belum ada user terdaftar</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+<!-- USER REPORTS PAGE -->
+<div x-show="page==='userReports'" class="min-h-screen bg-slate-50 p-4">
+<div class="max-w-4xl mx-auto">
+<!-- Header -->
+<div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100 mb-6">
+<div class="flex items-center gap-4 mb-4">
+<button @click="page='adminDashboard'" class="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-200">
+← Kembali
+</button>
+<div class="flex items-center gap-3">
+<div class="w-12 h-12 bg-slate-200 rounded-full overflow-hidden">
+<template x-if="viewingUser?.profile_photo"><img :src="viewingUser.profile_photo" class="w-full h-full object-cover"></template>
+<template x-if="!viewingUser?.profile_photo"><div class="w-full h-full flex items-center justify-center text-slate-400 text-xs">👤</div></template>
+</div>
+<div>
+<h2 class="text-xl font-black text-slate-800" x-text="viewingUser?.name"></h2>
+<p class="text-sm text-slate-500" x-text="viewingUser?.username"></p>
+</div>
+</div>
+</div>
+
+<!-- User Stats -->
+<div class="grid grid-cols-3 gap-4">
+<div class="bg-blue-50 p-4 rounded-xl text-center">
+<p class="text-2xl font-black text-blue-600" x-text="safeGetUserStats(viewingUser?.id).totalTasks"></p>
+<p class="text-xs text-blue-500">Total Pekerjaan</p>
+</div>
+<div class="bg-emerald-50 p-4 rounded-xl text-center">
+<p class="text-2xl font-black text-emerald-600" x-text="safeGetUserStats(viewingUser?.id).completedTasks"></p>
+<p class="text-xs text-emerald-500">Selesai</p>
+</div>
+<div class="bg-orange-50 p-4 rounded-xl text-center">
+<p class="text-2xl font-black text-orange-600" x-text="safeGetUserStats(viewingUser?.id).pendingTasks"></p>
+<p class="text-xs text-orange-500">Pending</p>
+</div>
+</div>
+</div>
+
+<!-- User Reports List -->
+<div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
+<h3 class="text-lg font-black text-slate-800 mb-4">Laporan User</h3>
+<div class="space-y-3">
+<template x-for="task in getUserReports(viewingUser?.id)" :key="task.id">
+<div class="bg-slate-50 p-4 rounded-xl hover:bg-slate-100 transition">
+<div class="flex items-start gap-4">
+<div class="w-16 h-16 bg-slate-200 rounded-xl overflow-hidden shrink-0">
+<template x-if="task.foto"><img :src="task.foto" class="w-full h-full object-cover"></template>
+<template x-if="!task.foto"><div class="w-full h-full flex items-center justify-center text-slate-300 text-xs">No Image</div></template>
+</div>
+<div class="flex-1">
+<div class="flex items-center gap-2 mb-2">
+<h4 class="font-bold text-sm text-slate-800" x-text="task.ruangan"></h4>
+<span :class="task.statusPekerjaan==='Selesai'?'bg-emerald-100 text-emerald-700':'bg-orange-100 text-orange-700'" class="px-2 py-1 rounded text-xs font-bold" x-text="task.statusPekerjaan"></span>
+</div>
+<h5 class="font-semibold text-sm text-slate-700 mb-1" x-text="task.gedung"></h5>
+<p class="text-xs text-slate-500 mb-1" x-text="`${task.tanggal} ${task.waktu}`"></p>
+<p class="text-xs text-slate-600 mb-2 line-clamp-2" x-text="task.masalah"></p>
+<div class="flex gap-2">
+<button @click="viewingTask=task" class="px-3 py-1 bg-blue-100 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-200">Detail</button>
+<button @click="shareToWhatsApp(task)" class="px-3 py-1 bg-green-100 text-green-600 rounded-lg text-xs font-bold hover:bg-green-200">Share</button>
+<template x-if="task.statusPekerjaan==='Belum Selesai'">
+<button @click="editPendingTask(task)" class="px-3 py-1 bg-emerald-100 text-emerald-600 rounded-lg text-xs font-bold hover:bg-emerald-200">Edit Selesai</button>
+</template>
+</div>
+</div>
+</div>
+</div>
+</template>
+<div x-show="getUserReports(viewingUser?.id).length===0" class="text-center py-10">
+<p class="text-sm text-slate-400">User ini belum memiliki laporan</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+<!-- EDIT PENDING TASK PAGE -->
+<div x-show="page==='editPendingTask'" class="min-h-screen bg-slate-50 p-4">
+<div class="max-w-md mx-auto">
+<div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
+<div class="flex items-center justify-between mb-6">
+<h2 class="text-xl font-black text-slate-800">Edit Status Pekerjaan</h2>
+<button @click="page='userReports'; editingTask=null" class="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-200">Batal</button>
+</div>
+
+<template x-if="editingTask">
+<div class="space-y-4">
+<div class="bg-orange-50 p-4 rounded-xl border border-orange-100">
+<p class="text-xs font-bold text-orange-600 mb-2">Status Awal</p>
+<p class="text-sm text-orange-800 font-bold">Belum Selesai</p>
+<p class="text-xs text-orange-600 mt-1">Alasan Pending:</p>
+<p class="text-sm text-orange-700" x-text="editingTask.originalPenyelesaian"></p>
+<p class="text-xs text-orange-500 mt-2" x-text="`${editingTask.tanggal} ${editingTask.waktu}`"></p>
+</div>
+
+<div class="bg-slate-50 p-4 rounded-xl">
+<p class="text-xs font-bold text-slate-600 mb-1">Lokasi</p>
+<p class="text-sm text-slate-800 font-bold" x-text="`${editingTask.gedung} - ${editingTask.ruangan}`"></p>
+</div>
+
+<div class="bg-slate-50 p-4 rounded-xl">
+<p class="text-xs font-bold text-slate-600 mb-1">Permasalahan</p>
+<p class="text-sm text-slate-800" x-text="editingTask.masalah"></p>
+</div>
+
+<div>
+<label class="block text-xs font-bold text-slate-600 mb-2">Penyelesaian Pekerjaan <span class="text-red-500">*</span></label>
+<textarea x-model="editingTask.newPenyelesaian" class="input-style" placeholder="Deskripsikan bagaimana pekerjaan diselesaikan..." rows="4"></textarea>
+</div>
+
+<div class="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+<p class="text-xs font-bold text-emerald-600 mb-1">Status Baru</p>
+<p class="text-sm text-emerald-800 font-bold">Selesai</p>
+<p class="text-xs text-emerald-500 mt-1" x-text="`${dayjs().format('DD/MM/YYYY')} ${dayjs().format('HH:mm')}`"></p>
+</div>
+
+<button @click="saveEditedTask" class="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition">Simpan Perubahan</button>
+</div>
+</template>
+</div>
+</div>
+</div>
+
+<!-- USER PROFILE WITH TASKS PAGE -->
+<div x-show="page==='userProfileWithTasks'" class="min-h-screen bg-slate-50 p-4">
+<div class="max-w-4xl mx-auto">
+<!-- Header -->
+<div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100 mb-6">
+<div class="flex items-center gap-4 mb-4">
+<button @click="page='adminDashboard'" class="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-200">
+← Kembali
+</button>
+<div class="flex items-center gap-3">
+<div class="w-12 h-12 bg-slate-200 rounded-full overflow-hidden">
+<template x-if="viewingUser?.profile_photo"><img :src="viewingUser.profile_photo" class="w-full h-full object-cover"></template>
+<template x-if="!viewingUser?.profile_photo"><div class="w-full h-full flex items-center justify-center text-slate-400 text-xs">👤</div></template>
+</div>
+<div>
+<h2 class="text-xl font-black text-slate-800" x-text="viewingUser?.name"></h2>
+<p class="text-sm text-slate-500" x-text="viewingUser?.username"></p>
+</div>
+</div>
+</div>
+
+<!-- User Stats -->
+<div class="grid grid-cols-3 gap-4 mb-6">
+<div class="bg-blue-50 p-4 rounded-xl text-center">
+<p class="text-2xl font-black text-blue-600" x-text="safeGetUserStats(viewingUser?.id).totalTasks"></p>
+<p class="text-xs text-blue-500">Total Pekerjaan</p>
+</div>
+<div class="bg-emerald-50 p-4 rounded-xl text-center">
+<p class="text-2xl font-black text-emerald-600" x-text="safeGetUserStats(viewingUser?.id).completedTasks"></p>
+<p class="text-xs text-emerald-500">Selesai</p>
+</div>
+<div class="bg-orange-50 p-4 rounded-xl text-center">
+<p class="text-2xl font-black text-orange-600" x-text="safeGetUserStats(viewingUser?.id).pendingTasks"></p>
+<p class="text-xs text-orange-500">Pending</p>
+</div>
+</div>
+
+<!-- Edit Profile Section -->
+<div class="bg-slate-50 p-4 rounded-xl">
+<h3 class="text-sm font-black text-slate-800 mb-4">Edit Profil User</h3>
+<div class="space-y-3">
+<div>
+<label class="block text-xs font-bold text-slate-600 mb-1">Nama Lengkap</label>
+<input x-model="editingUserProfile.newName" type="text" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm">
+</div>
+<div>
+<label class="block text-xs font-bold text-slate-600 mb-1">Username</label>
+<input x-model="editingUserProfile.newUsername" type="text" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm">
+</div>
+<div>
+<label class="block text-xs font-bold text-slate-600 mb-1">Password</label>
+<input x-model="editingUserProfile.newPassword" type="text" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm">
+</div>
+<div>
+<label class="block text-xs font-bold text-slate-600 mb-1">Bidang/Bagian Teknisi</label>
+<input x-model="editingUserProfile.newSpecialization" type="text" placeholder="Contoh: Teknisi AC, Teknisi Listrik, dll" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm">
+</div>
+<button @click="saveEditedUserProfile" class="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition">Simpan Profil</button>
+</div>
+</div>
+</div>
+
+<!-- All Tasks List -->
+<div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
+<h3 class="text-lg font-black text-slate-800 mb-4">Semua Laporan User</h3>
+<div class="space-y-3">
+<template x-for="task in getUserAllTasks(viewingUser?.id)" :key="task.id">
+<div class="bg-slate-50 p-4 rounded-xl hover:bg-slate-100 transition">
+<div class="flex items-start gap-4">
+<div class="w-16 h-16 bg-slate-200 rounded-xl overflow-hidden shrink-0">
+<template x-if="task.foto"><img :src="task.foto" class="w-full h-full object-cover"></template>
+<template x-if="!task.foto"><div class="w-full h-full flex items-center justify-center text-slate-300 text-xs">No Image</div></template>
+</div>
+<div class="flex-1">
+<div class="flex items-center gap-2 mb-2">
+<h4 class="font-bold text-sm text-slate-800" x-text="task.ruangan"></h4>
+<span :class="task.statusPekerjaan==='Selesai'?'bg-emerald-100 text-emerald-700':'bg-orange-100 text-orange-700'" class="px-2 py-1 rounded text-xs font-bold" x-text="task.statusPekerjaan"></span>
+</div>
+<h5 class="font-semibold text-sm text-slate-700 mb-1" x-text="task.gedung"></h5>
+<p class="text-xs text-slate-500 mb-1" x-text="`${task.tanggal} ${task.waktu}`"></p>
+<p class="text-xs text-slate-600 mb-2 line-clamp-2" x-text="task.masalah"></p>
+<div class="flex gap-2">
+<button @click="viewingTask=task" class="px-3 py-1 bg-blue-100 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-200">Detail</button>
+<button @click="shareToWhatsApp(task)" class="px-3 py-1 bg-green-100 text-green-600 rounded-lg text-xs font-bold hover:bg-green-200">Share</button>
+<template x-if="task.statusPekerjaan==='Belum Selesai'">
+<button @click="editPendingTask(task)" class="px-3 py-1 bg-emerald-100 text-emerald-600 rounded-lg text-xs font-bold hover:bg-emerald-200">Edit Selesai</button>
+</template>
+</div>
+</div>
+</div>
+</div>
+</template>
+<div x-show="getUserAllTasks(viewingUser?.id).length===0" class="text-center py-10">
+<p class="text-sm text-slate-400">User ini belum memiliki laporan</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>
