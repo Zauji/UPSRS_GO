@@ -39,8 +39,8 @@ dayjs.locale('id');
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
   // Supabase Configuration - API URL dan Anon Key yang baru
-  const SUPABASE_URL = 'https://rxwkaxcasgmjiyhltatn.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4d2theGNhc2dtaml5aGx0YXRuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk0ODYxMTgsImV4cCI6MjA4NTA2MjExOH0.jLk0YVDNLsluz1y07KOv1Ju8K2xiAONz_f1ecbLYpac';
+  const SUPABASE_URL = 'https://jhyimnevtnsxjiazramp.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpoeWltbmV2dG5zeGppYXpyYW1wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1MjQ0ODEsImV4cCI6MjA4NTEwMDQ4MX0.GKB5wULLc0YrUchgdiX5NpIdvpU4O0pHws1hjlE6vxk';
   
   // Inisialisasi Supabase dengan window reference
   window.supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -253,6 +253,42 @@ if(!adminUser){
 this.registeredUsers.push({id:999,name:'Super Admin',username:'Admin',password:'oTikaoke',role:'admin',profile_photo:null});
 localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
 }
+
+// Mobile online detection and auto-sync
+if(navigator.userAgent.includes('Mobile')){
+window.addEventListener('online',()=>{
+console.log('Mobile device online - syncing data...');
+this.syncMobileTasks();
+});
+}
+},
+
+async syncMobileTasks(){
+try{
+const localTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
+const unsyncedTasks=localTasks.filter(task=>!task.synced_at);
+if(unsyncedTasks.length===0)return;
+
+console.log(`Syncing ${unsyncedTasks.length} mobile tasks...`);
+for(const task of unsyncedTasks){
+const { error } = await window.supabaseClient
+.from('tasks')
+.insert([{
+...task,
+synced_at:new Date().toISOString()
+}]);
+
+if(!error){
+task.synced_at=new Date().toISOString();
+}
+}
+
+await this.safeStorageSet('upsrs_tasks_v3', localTasks);
+await this.syncFromSupabase();
+console.log('Mobile sync completed');
+}catch(error){
+console.error('Mobile sync error:', error);
+}
 },
 
 // Sync data dari Supabase ke localStorage
@@ -267,29 +303,44 @@ this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
 return;
 }
 
-// Sync users
-const { data: users } = await window.supabaseClient.from('users').select('*');
-if(users){
-this.registeredUsers = users;
-await this.safeStorageSet('upsrs_users_v3', users);
+// Sync users dengan error handling
+try{
+const { data: users, error: usersError } = await window.supabaseClient.from('users').select('*');
+if(usersError){
+console.warn('Users table not found, using localStorage:', usersError);
+this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
+}else if(users){
+this.registeredUsers=users;
+localStorage.setItem('upsrs_users_v3',JSON.stringify(users));
+}
+}catch(err){
+console.warn('Error syncing users, using localStorage:', err);
+this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
 }
 
-// Sync tasks
-const { data: tasks } = await window.supabaseClient.from('tasks').select('*').order('id', { ascending: false });
-if(tasks){
-this.savedTasks = tasks;
-await this.safeStorageSet('upsrs_tasks_v3', tasks);
+// Sync tasks dengan error handling
+try{
+const { data: tasks, error: tasksError } = await window.supabaseClient.from('tasks').select('*').order('id', { ascending: false });
+if(tasksError){
+console.warn('Tasks table not found, using localStorage:', tasksError);
+this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
+}else if(tasks){
+this.savedTasks=tasks;
+localStorage.setItem('upsrs_tasks_v3',JSON.stringify(tasks));
+}
+}catch(err){
+console.warn('Error syncing tasks, using localStorage:', err);
+this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
 }
 
 console.log('Sync from Supabase completed');
 }catch(error){
 console.error('Sync error:', error);
-// Fallback ke localStorage jika gagal
+// Fallback ke localStorage
 this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
 this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
 }
 },
-
 // Refresh admin statistics
 async refreshAdminStats(){
 const now = dayjs();
@@ -364,15 +415,72 @@ return { totalTasks: 0, completedTasks: 0, pendingTasks: 0 };
 }
 },
 
-handleLogin(){
+async handleLogin(){
 if(!this.authUsername||!this.authPassword)return alert('Isi username dan password!');
+
+try{
+// Try login via Supabase first for desktop
+if(!navigator.userAgent.includes('Mobile') && window.supabaseClient){
+const { data: u, error } = await window.supabaseClient
+.from('users')
+.select('*')
+.eq('username', this.authUsername)
+.eq('password', this.authPassword)
+.single();
+
+if(!error && u){
+this.currentUser = u;
+localStorage.setItem('upsrs_current_user', JSON.stringify(u));
+this.page = u.role === 'admin' ? 'adminDashboard' : 'dashboard';
+this.authUsername='';
+this.authPassword='';
+return;
+}
+}
+
+// Fallback to localStorage
 const u=this.registeredUsers.find(x=>x.username===this.authUsername&&x.password===this.authPassword);
-if(!u)return alert('Login gagal!');
+if(!u){
+if(navigator.userAgent.includes('Mobile')){
+return alert('Login gagal! Periksa koneksi internet dan coba lagi.');
+}else{
+return alert('Login gagal! Periksa username dan password.');
+}
+}
+
 this.currentUser=u;
 localStorage.setItem('upsrs_current_user',JSON.stringify(u));
 this.page='dashboard';
 this.authUsername='';
 this.authPassword='';
+
+// Sync user data to Supabase for desktop
+if(!navigator.userAgent.includes('Mobile') && window.supabaseClient){
+try{
+await window.supabaseClient
+.from('users')
+.upsert([u]);
+console.log('User synced to Supabase');
+}catch(syncError){
+console.log('Sync to Supabase failed, but login successful');
+}
+}
+
+}catch(error){
+console.error('Login error:', error);
+// Final fallback to localStorage
+const u=this.registeredUsers.find(x=>x.username===this.authUsername&&x.password===this.authPassword);
+if(u){
+this.currentUser=u;
+localStorage.setItem('upsrs_current_user',JSON.stringify(u));
+this.page='dashboard';
+this.authUsername='';
+this.authPassword='';
+alert('Login berhasil (offline mode).');
+}else{
+alert('Login gagal! Periksa username dan password.');
+}
+}
 },
 
 handleRegister(){
@@ -430,15 +538,73 @@ alert('Terjadi kesalahan saat menyimpan ke cloud. Data tersimpan di localStorage
 }
 },
 
-handleAdminLogin(){
+async handleAdminLogin(){
 if(!this.authUsername||!this.authPassword)return alert('Isi username dan password admin!');
+
+try{
+// Try admin login via Supabase first for desktop
+if(!navigator.userAgent.includes('Mobile') && window.supabaseClient){
+const { data: u, error } = await window.supabaseClient
+.from('users')
+.select('*')
+.eq('username', this.authUsername)
+.eq('password', this.authPassword)
+.eq('role', 'admin')
+.single();
+
+if(!error && u){
+this.currentUser = u;
+localStorage.setItem('upsrs_current_user', JSON.stringify(u));
+this.page = 'adminDashboard';
+this.authUsername='';
+this.authPassword='';
+return;
+}
+}
+
+// Fallback to localStorage
 const u=this.registeredUsers.find(x=>x.username===this.authUsername&&x.password===this.authPassword&&x.role==='admin');
-if(!u)return alert('Login admin gagal! Periksa kredensial Anda.');
+if(!u){
+if(navigator.userAgent.includes('Mobile')){
+return alert('Login admin gagal! Periksa koneksi internet dan coba lagi.');
+}else{
+return alert('Login admin gagal! Periksa kredensial Anda.');
+}
+}
+
 this.currentUser=u;
 localStorage.setItem('upsrs_current_user',JSON.stringify(u));
 this.page='adminDashboard';
 this.authUsername='';
 this.authPassword='';
+
+// Sync admin data to Supabase for desktop
+if(!navigator.userAgent.includes('Mobile') && window.supabaseClient){
+try{
+await window.supabaseClient
+.from('users')
+.upsert([u]);
+console.log('Admin synced to Supabase');
+}catch(syncError){
+console.log('Sync to Supabase failed, but admin login successful');
+}
+}
+
+}catch(error){
+console.error('Admin login error:', error);
+// Final fallback to localStorage
+const u=this.registeredUsers.find(x=>x.username===this.authUsername&&x.password===this.authPassword&&x.role==='admin');
+if(u){
+this.currentUser=u;
+localStorage.setItem('upsrs_current_user',JSON.stringify(u));
+this.page='adminDashboard';
+this.authUsername='';
+this.authPassword='';
+alert('Login admin berhasil (offline mode).');
+}else{
+alert('Login admin gagal! Periksa kredensial Anda.');
+}
+}
 },
 
 handleFileUpload(e){
@@ -541,74 +707,67 @@ foto:this.newTask.foto||null
 };
 
     try {
-        console.log('=== DEBUG: Saving Task ===');
-        console.log('Entry data:', entry);
-        console.log('Supabase client:', window.supabaseClient);
-        
-        // Check if Supabase client exists
-        if (!window.supabaseClient) {
-            console.error('Supabase client not found!');
-            alert('Supabase client not initialized. Please refresh the page.');
+        // Check internet connection for mobile
+        if(navigator.userAgent.includes('Mobile') && !navigator.onLine){
+            // Fallback to localStorage for offline mobile
+            this.savedTasks.unshift(entry);
+            await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
+            alert('Laporan tersimpan di perangkat (offline). Akan sinkronisasi saat online.');
+            this.resetTaskForm();
             return;
         }
-        
-        // Test connection first
-        console.log('Testing Supabase connection...');
-        const { data: testData, error: testError } = await window.supabaseClient
-            .from('users')
-            .select('count')
-            .limit(1);
-            
-        if (testError) {
-            console.error('Supabase connection test failed:', testError);
-            alert('Supabase connection failed: ' + testError.message);
-            return;
-        }
-        
-        console.log('Supabase connection OK, inserting task...');
-        
+
         // Mengirim data ke tabel 'tasks' di database Supabase
         const { data, error } = await window.supabaseClient
             .from('tasks') 
             .insert([entry]);
 
-        console.log('Insert result:', { data, error });
-
         if (error) {
-            console.error('=== DETAILED ERROR ===');
-            console.error('Error code:', error.code);
-            console.error('Error message:', error.message);
-            console.error('Error details:', error.details);
-            console.error('Error hint:', error.hint);
+            // Fallback untuk mobile jika Supabase error
+            if(navigator.userAgent.includes('Mobile')){
+                this.savedTasks.unshift(entry);
+                await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
+                alert('Gagal menyimpan ke cloud. Laporan tersimpan di perangkat dan akan sinkronisasi nanti.');
+                this.resetTaskForm();
+                return;
+            }
             throw error;
         }
 
-        console.log('Task saved successfully:', data);
         alert('Laporan berhasil disimpan ke Supabase!');
-        
-        // Mengosongkan form kembali setelah berhasil
-        this.newTask = {
-            gedung: '', ruangan: '', pelapor: '', masalah: '', 
-            penyelesaian: '', statusPekerjaan: 'Selesai', 
-            alasanPending: '', foto: null
-        };
-        
-        // Memperbarui tampilan aplikasi
-        if (typeof this.initApp === 'function') this.initApp();
+        this.resetTaskForm();
 
     } catch (err) {
-        console.error('=== CATCH BLOCK ERROR ===');
-        console.error('Full error object:', err);
-        console.error('Error message:', err.message);
-        console.error('Error stack:', err.stack);
+        console.error('Error:', err);
         
-        alert('Gagal menyimpan ke cloud: ' + err.message + '\n\nCheck console for details.');
+        // Mobile fallback
+        if(navigator.userAgent.includes('Mobile')){
+            this.savedTasks.unshift(entry);
+            await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
+            alert('Terjadi error. Laporan tersimpan di perangkat dan akan sinkronisasi nanti.');
+            this.resetTaskForm();
+            return;
+        }
+        
+        alert('Gagal menyimpan: ' + err.message);
     }
 
     // Refresh admin stats if Super Admin is logged in
     if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
         this.refreshAdminStats();
     }
+},
+
+resetTaskForm(){
+    // Mengosongkan form kembali setelah berhasil
+    this.newTask = {
+        gedung: '', ruangan: '', pelapor: '', masalah: '', 
+        penyelesaian: '', statusPekerjaan: 'Selesai', 
+        alasanPending: '', foto: null
+    };
+    
+    // Memperbarui tampilan aplikasi
+    if (typeof this.initApp === 'function') this.initApp();
 },
 
 async exportToExcel(){
