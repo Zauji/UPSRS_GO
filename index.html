@@ -274,8 +274,21 @@ if(u){
 this.currentUser=JSON.parse(u);
 // Check if current user is Super Admin and redirect to admin dashboard
 if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
+// Ensure data is loaded before redirect
+if(this.registeredUsers.length === 0){
+this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
+}
+if(this.savedTasks.length === 0){
+this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
+this.tasks = [...this.savedTasks];
+}
 this.page='adminDashboard';
-await this.refreshAdminStats();
+// Call the sync version of refreshAdminStats
+try{
+await this.syncFromSupabase();
+}catch(error){
+console.error('Sync failed during admin login:', error);
+}
 }else{
 this.page='dashboard';
 }
@@ -442,6 +455,7 @@ alert('Semua akun telah dihapus!');
 },
 
 get filteredTasks(){
+try{
 // Super Admin can see all tasks, regular users only see their own
 if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
 return this.getAllUserTasks();
@@ -453,6 +467,10 @@ if (this.currentUser?.role !== 'admin') {
 }
 
 return this.savedTasks;
+}catch(error){
+console.error('Error in filteredTasks:', error);
+return [];
+}
 },
 
 get stats(){
@@ -467,7 +485,7 @@ pending:this.filteredTasks.filter(t=>t.statusPekerjaan==='Belum Selesai').length
 getUserStats(userId){
 const user = this.registeredUsers.find(u => u.id === userId);
 if(!user) return { totalTasks: 0, completedTasks: 0, pendingTasks: 0 };
-const userTasks = this.savedTasks.filter(t => t.teknisi === user.name);
+const userTasks = this.savedTasks.filter(t => t.user_id === user.id);
 return{
 totalTasks:userTasks.length,
 completedTasks:userTasks.filter(t=>t.statusPekerjaan==='Selesai').length,
@@ -970,9 +988,10 @@ return this.registeredUsers.filter(u=>u.role!=='admin');
 },
 
 getAllUserTasks(){
+try{
 const allTasks=[];
 this.regularUsers.forEach(user=>{
-const userTasks=this.savedTasks.filter(task=>task.teknisi===user.name);
+const userTasks=this.savedTasks.filter(task=>task.user_id===user.id);
 userTasks.forEach(task=>{
 allTasks.push({...task,userProfile:user.profile_photo,userRole:user.role});
 });
@@ -982,6 +1001,10 @@ const dateA=dayjs(a.tanggal,'DD/MM/YYYY');
 const dateB=dayjs(b.tanggal,'DD/MM/YYYY');
 return dateB.isAfter(dateA)?1:-1;
 });
+}catch(error){
+console.error('Error in getAllUserTasks:', error);
+return [];
+}
 },
 
 getAdminStats(){
@@ -1001,10 +1024,6 @@ thisMonthCompleted:allTasks.filter(t=>t.statusPekerjaan==='Selesai' && dayjs(t.t
 },
 
 // Force refresh admin stats
-refreshAdminStats(){
-// This function will be called to force reactivity
-return this.getAdminStats();
-},
 
 // Enhanced export for admin
 async exportAllTasksToExcel(){
