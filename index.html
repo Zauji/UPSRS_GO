@@ -289,8 +289,24 @@ console.log('🚀 Initializing UPSRS GO...');
 this.appLoaded = false;
 this.hasError = false;
 
+// Set timeout untuk prevent infinite loading
+const loadingTimeout = setTimeout(() => {
+  console.warn('⚠️ Loading timeout - forcing app to show');
+  this.appLoaded = true;
+}, 15000); // 15 detik timeout
+
 // Sync dari Supabase saat app dibuka
-await this.syncFromSupabase();
+console.log('🔄 Starting Supabase sync...');
+try {
+  await this.syncFromSupabase();
+  console.log('✅ Supabase sync completed');
+} catch (syncError) {
+  console.error('❌ Supabase sync failed, using fallback:', syncError);
+  // Force data dari localStorage sebagai fallback
+  this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
+  this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
+  this.tasks = [...this.savedTasks];
+}
 
 this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
 this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
@@ -351,6 +367,9 @@ this.syncMobileTasks();
 if (this.isOnline) {
 this.cleanLocalTasks();
 }
+
+// Clear timeout jika berhasil
+clearTimeout(loadingTimeout);
 
 console.log('✅ UPSRS GO initialized successfully');
 this.appLoaded = true;
@@ -1441,6 +1460,11 @@ this.page='dashboard';
       <div class="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
       <p class="text-slate-600 font-medium">Memuat UPSRS GO...</p>
       <p class="text-slate-400 text-sm mt-2">Mohon tunggu sebentar</p>
+      
+      <!-- Manual Skip Button -->
+      <button @click="appLoaded = true" class="mt-4 px-4 py-2 bg-slate-200 text-slate-600 rounded-lg hover:bg-slate-300 text-sm">
+        Lewati Loading
+      </button>
     </div>
   </div>
 
