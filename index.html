@@ -38,13 +38,32 @@ dayjs.locale('id');
 <!-- Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
+  // Production Debug Console
+  console.log('🌍 Environment:', {
+    hostname: window.location.hostname,
+    protocol: window.location.protocol,
+    userAgent: navigator.userAgent,
+    isMobile: navigator.userAgent.includes('Mobile'),
+    isVercel: window.location.hostname.includes('vercel.app')
+  });
+
   // Supabase Configuration - API URL dan Anon Key yang baru
   const SUPABASE_URL = 'https://buwvubvoljbdigxzyysl.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ1d3Z1YnZvbGpiZGlneHp5eXNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1Mzk3NDIsImV4cCI6MjA4NTExNTc0Mn0.TCH6ztbSXiODI42C6Vlr91_O5YGKcC-uj8xPUcu1GIg';
   
-  // Inisialisasi Supabase dengan window reference
-  window.supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  console.log('Supabase connected:', window.supabaseClient);
+  // Inisialisasi Supabase dengan error handling
+  try {
+    if (typeof supabase !== 'undefined') {
+      window.supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      console.log('✅ Supabase connected successfully');
+    } else {
+      console.error('❌ Supabase library not loaded');
+      window.supabaseClient = null;
+    }
+  } catch (error) {
+    console.error('❌ Supabase initialization failed:', error);
+    window.supabaseClient = null;
+  }
 </script>
 
 <!-- ExcelJS & FileSaver -->
@@ -248,6 +267,11 @@ showPass: false,
 // Debounce timer
 syncDebounceTimer: null,
 
+// App state
+appLoaded: false,
+hasError: false,
+errorMessage: '',
+
 // Fungsi init untuk listener
 init() {
   window.addEventListener('online', () => {
@@ -260,6 +284,11 @@ init() {
 },
 
 async initApp(){
+try{
+console.log('🚀 Initializing UPSRS GO...');
+this.appLoaded = false;
+this.hasError = false;
+
 // Sync dari Supabase saat app dibuka
 await this.syncFromSupabase();
 
@@ -322,6 +351,15 @@ this.syncMobileTasks();
 if (this.isOnline) {
 this.cleanLocalTasks();
 }
+
+console.log('✅ UPSRS GO initialized successfully');
+this.appLoaded = true;
+}catch(error){
+console.error('❌ Failed to initialize UPSRS GO:', error);
+this.hasError = true;
+this.errorMessage = 'Gagal memuat aplikasi: ' + error.message;
+this.appLoaded = true; // Hide loading
+}
 },
 
 async syncMobileTasks(){
@@ -383,25 +421,28 @@ async syncFromSupabase(){
 try{
 // Pastikan supabaseClient tersedia
 if(!window.supabaseClient){
-console.error('Supabase client not initialized');
+console.warn('⚠️ Supabase client not available, using localStorage only');
 // Fallback ke localStorage
 this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
 this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
 return;
 }
 
+console.log('🔄 Syncing from Supabase...');
+
 // Sync users dengan error handling
 try{
 const { data: users, error: usersError } = await window.supabaseClient.from('users').select('*');
 if(usersError){
-console.warn('Users table not found, using localStorage:', usersError);
+console.warn('⚠️ Users table not found, using localStorage:', usersError);
 this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
 }else if(users){
 this.registeredUsers=users;
 localStorage.setItem('upsrs_users_v3',JSON.stringify(users));
+console.log('✅ Users synced from Supabase:', users.length);
 }
 }catch(err){
-console.warn('Error syncing users, using localStorage:', err);
+console.warn('⚠️ Error syncing users, using localStorage:', err);
 this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
 }
 
@@ -409,21 +450,22 @@ this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
 try{
 const { data: tasks, error: tasksError } = await window.supabaseClient.from('tasks').select('*').order('id', { ascending: false });
 if(tasksError){
-console.warn('Tasks table not found, using localStorage:', tasksError);
+console.warn('⚠️ Tasks table not found, using localStorage:', tasksError);
 this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
 }else if(tasks){
 this.savedTasks=tasks;
 this.tasks = [...tasks]; // Update tasks state
 localStorage.setItem('upsrs_tasks_v3',JSON.stringify(tasks));
+console.log('✅ Tasks synced from Supabase:', tasks.length);
 }
 }catch(err){
-console.warn('Error syncing tasks, using localStorage:', err);
+console.warn('⚠️ Error syncing tasks, using localStorage:', err);
 this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
 }
 
-console.log('Sync from Supabase completed');
+console.log('✅ Sync from Supabase completed');
 }catch(error){
-console.error('Sync error:', error);
+console.error('❌ Sync error:', error);
 // Fallback ke localStorage
 this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
 this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
@@ -1393,6 +1435,28 @@ this.page='dashboard';
 </head>
 
 <body x-data="appData()" x-init="initApp()" x-cloak class="antialiased">
+  <!-- Loading State -->
+  <div x-show="!appLoaded" x-transition class="fixed inset-0 bg-slate-50 flex items-center justify-center z-50">
+    <div class="text-center">
+      <div class="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+      <p class="text-slate-600 font-medium">Memuat UPSRS GO...</p>
+      <p class="text-slate-400 text-sm mt-2">Mohon tunggu sebentar</p>
+    </div>
+  </div>
+
+  <!-- Error State -->
+  <div x-show="hasError" x-transition class="fixed inset-0 bg-slate-50 flex items-center justify-center z-50">
+    <div class="text-center max-w-md mx-4">
+      <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+        <span class="text-2xl">❌</span>
+      </div>
+      <h2 class="text-xl font-bold text-slate-800 mb-2">Terjadi Kesalahan</h2>
+      <p class="text-slate-600 mb-4" x-text="errorMessage"></p>
+      <button @click="location.reload()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+        Refresh Halaman
+      </button>
+    </div>
+  </div>
 
 <!-- LOGIN -->
 <div x-show="page==='login'" class="min-h-screen flex items-center justify-center bg-slate-50 p-4">
