@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>UPSRS GO! - Pro Edition</title>
 
+<!-- Alpine.js x-cloak CSS - WAJIB -->
+<style>
+  [x-cloak] { display: none !important; }
+</style>
+
 <!-- Favicon -->
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
 
@@ -96,13 +101,6 @@ isExporting:false,
 editingTask:null,
 viewingTask:null,
 viewingUser:null,
-adminStats:{
-todayTasks:0,
-weeklyTasks:0,
-thisWeekCompleted:0,
-monthlyTasks:0,
-thisMonthCompleted:0
-},
 
 // State dasar untuk sync
 tasks: [],
@@ -204,7 +202,6 @@ return false;
 },
 
 // Editing states
-editingTask:null,
 editingUserProfile:{
 newName:'',
 newUsername:'',
@@ -246,10 +243,6 @@ dataLokasi:{
 
 savedTasks:[],
 registeredUsers:[],
-
-// State dasar untuk sync
-tasks: [],
-lastSyncTime: localStorage.getItem('last_sync_time'),
 
 // State koneksi
 isOnline: navigator.onLine,
@@ -608,7 +601,8 @@ return alert('Login gagal! Periksa username dan password atau coba refresh halam
 console.log('Login successful via localStorage:', u);
 this.currentUser=u;
 localStorage.setItem('current_user',JSON.stringify(u));
-this.page='dashboard';
+// Check if admin and redirect to admin dashboard
+this.page = u.role === 'admin' ? 'adminDashboard' : 'dashboard';
 this.authUsername='';
 this.authPassword='';
 
@@ -1048,30 +1042,15 @@ get regularUsers(){
 return this.registeredUsers.filter(u=>u.role!=='admin');
 },
 
-getAllUserTasks(){
+get adminStats(){
 try{
-const allTasks=[];
-this.regularUsers.forEach(user=>{
-const userTasks=this.savedTasks.filter(task=>task.user_id===user.id);
-userTasks.forEach(task=>{
-allTasks.push({...task,userProfile:user.profile_photo,userRole:user.role});
-});
-});
-return allTasks.sort((a,b)=>{
-const dateA=dayjs(a.tanggal,'DD/MM/YYYY');
-const dateB=dayjs(b.tanggal,'DD/MM/YYYY');
-return dateB.isAfter(dateA)?1:-1;
-});
-}catch(error){
-console.error('Error in getAllUserTasks:', error);
-return [];
-}
-},
-
-getAdminStats(){
+console.log('🔍 Computing adminStats...');
+console.log('📊 Regular users:', this.regularUsers.length);
+console.log('📝 Saved tasks:', this.savedTasks.length);
 const allTasks=this.getAllUserTasks();
+console.log('👥 All user tasks:', allTasks.length);
 const now=dayjs();
-return{
+const stats={
 totalTasks:allTasks.length,
 totalUsers:this.regularUsers.length,
 completedTasks:allTasks.filter(t=>t.statusPekerjaan==='Selesai').length,
@@ -1082,9 +1061,50 @@ monthlyTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month'
 thisWeekCompleted:allTasks.filter(t=>t.statusPekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
 thisMonthCompleted:allTasks.filter(t=>t.statusPekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length
 };
+console.log('✅ Admin stats computed:', stats);
+return stats;
+}catch(error){
+console.error('❌ Error in adminStats:', error);
+return{
+totalTasks:0,
+totalUsers:0,
+completedTasks:0,
+pendingTasks:0,
+todayTasks:0,
+weeklyTasks:0,
+monthlyTasks:0,
+thisWeekCompleted:0,
+thisMonthCompleted:0
+}
+}
 },
 
-// Force refresh admin stats
+getAllUserTasks(){
+try{
+console.log('🔍 Getting all user tasks...');
+console.log('📊 Registered users:', this.registeredUsers.length);
+const allTasks=[];
+this.regularUsers.forEach(user=>{
+console.log(`👤 Processing user: ${user.name} (${user.id})`);
+const userTasks=this.savedTasks.filter(task=>task.user_id===user.id);
+console.log(`📝 Tasks for ${user.name}:`, userTasks.length);
+userTasks.forEach(task=>{
+allTasks.push({...task,userProfile:user.profile_photo,userRole:user.role});
+});
+});
+console.log('✅ Total all tasks before sorting:', allTasks.length);
+const sorted = allTasks.sort((a,b)=>{
+const dateA=dayjs(a.tanggal,'DD/MM/YYYY');
+const dateB=dayjs(b.tanggal,'DD/MM/YYYY');
+return dateB.isAfter(dateA)?1:-1;
+});
+console.log('✅ Sorted all tasks:', sorted.length);
+return sorted;
+}catch(error){
+console.error('❌ Error in getAllUserTasks:', error);
+return [];
+}
+},
 
 // Enhanced export for admin
 async exportAllTasksToExcel(){
@@ -1454,6 +1474,15 @@ this.page='dashboard';
 </head>
 
 <body x-data="appData()" x-init="initApp()" x-cloak class="antialiased">
+  <!-- UI Fallback - Anti Putih -->
+  <div x-show="!currentUser" class="p-6 text-center text-slate-500">
+    Loading dashboard...
+  </div>
+
+  <!-- Debug Info - Sementara -->
+  <div class="fixed bottom-2 right-2 bg-black text-white text-xs px-2 py-1 z-50">
+    <span x-text="currentUser ? currentUser.role : 'no user'"></span>
+  </div>
   <!-- Loading State -->
   <div x-show="!appLoaded" x-transition class="fixed inset-0 bg-slate-50 flex items-center justify-center z-50">
     <div class="text-center">
@@ -1570,7 +1599,7 @@ this.page='dashboard';
 </div>
 
 <!-- DASHBOARD -->
-<div x-show="page==='dashboard'" class="max-w-md mx-auto p-4 pb-24">
+<div x-show="page==='dashboard'" x-transition class="max-w-md mx-auto p-4 pb-24">
 <!-- Header -->
 <div class="flex justify-between items-center mb-6 bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
 <div class="flex items-center gap-3">
@@ -1918,7 +1947,7 @@ Share WhatsApp
 </div>
 
 <!-- ADMIN DASHBOARD -->
-<div x-show="page==='adminDashboard'" class="min-h-screen bg-slate-50 p-4">
+<div x-show="page==='adminDashboard'" x-transition class="min-h-screen bg-slate-50 p-4">
 <div class="max-w-6xl mx-auto">
 <!-- Header -->
 <div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100 mb-6">
