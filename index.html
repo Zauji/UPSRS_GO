@@ -5,23 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>UPSRS GO! - Pro Edition</title>
 
-<!-- Alpine.js x-cloak CSS - WAJIB -->
-<style>
-  [x-cloak] { display: none !important; }
-</style>
-
-<!-- Favicon -->
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
-
 <!-- Tailwind CSS -->
 <script>
-  // Disable all Tailwind CDN warnings for production
+  // Disable Tailwind CDN production warning
   window.TAILWIND_DISABLE_TOUCH = true;
-  // Override console.warn to suppress Tailwind warnings only
   const originalWarn = console.warn;
   console.warn = function(...args) {
     if (typeof args[0] === 'string' && args[0].includes('cdn.tailwindcss.com should not be used in production')) {
-      return; // Suppress this specific warning
+      return;
     }
     return originalWarn.apply(console, args);
   };
@@ -43,31 +34,18 @@ dayjs.locale('id');
 <!-- Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-  // Production Debug Console
-  console.log('🌍 Environment:', {
-    hostname: window.location.hostname,
-    protocol: window.location.protocol,
-    userAgent: navigator.userAgent,
-    isMobile: navigator.userAgent.includes('Mobile'),
-    isVercel: window.location.hostname.includes('vercel.app')
-  });
-
-  // Supabase Configuration - API URL dan Anon Key yang baru
-  const SUPABASE_URL = 'https://buwvubvoljbdigxzyysl.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ1d3Z1YnZvbGpiZGlneHp5eXNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1Mzk3NDIsImV4cCI6MjA4NTExNTc0Mn0.TCH6ztbSXiODI42C6Vlr91_O5YGKcC-uj8xPUcu1GIg';
+  // Ganti dengan URL dan Anon Key dari Project Settings > API di Supabase Anda
+  const SUPABASE_URL = 'https://zxlegpyzieciwykzjhon.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4bGVncHl6aWVjaXd5a3pqaG9uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2NjY4MzAsImV4cCI6MjA4NTI0MjgzMH0.bA_2LtumthKROSnEzIZEbFPYiQ6tT7vqeWOo7IO0haQ';
   
-  // Inisialisasi Supabase dengan error handling
   try {
-    if (typeof supabase !== 'undefined') {
-      window.supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-      console.log('✅ Supabase connected successfully');
-    } else {
-      console.error('❌ Supabase library not loaded');
-      window.supabaseClient = null;
-    }
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    window.supabaseClient = supabaseClient;
+    console.log('✅ Supabase client initialized:', SUPABASE_URL);
   } catch (error) {
-    console.error('❌ Supabase initialization failed:', error);
+    console.error('❌ Failed to initialize Supabase client:', error);
     window.supabaseClient = null;
+    console.warn('⚠️ Application will run in offline mode');
   }
 </script>
 
@@ -91,124 +69,18 @@ select.input-style{cursor:pointer}
 function appData(){
 return{
 page:'login',
-authUsername:'',
-authPassword:'',
-authName:'',
-authSpecialization:'',
-authProfilePhoto:null,
 currentUser:null,
-isExporting:false,
-editingTask:null,
 viewingTask:null,
 viewingUser:null,
+isExporting:false,
+editingUser:null,
 
-// State dasar untuk sync
-tasks: [],
-lastSyncTime: localStorage.getItem('last_sync_time'),
-
-// Storage management functions
-checkStorageQuota(){
-try{
-const testKey='test_quota';
-const testData='x'.repeat(1024*1024); // 1MB test
-localStorage.setItem(testKey,testData);
-localStorage.removeItem(testKey);
-return {available:true,estimated:5}; // ~5MB available
-}catch(error){
-if(error.name==='QuotaExceededError'){
-return {available:false,estimated:0};
-}
-return {available:true,estimated:5};
-}
-},
-
-cleanupOldTasks(keepLastCount=50){
-try{
-const tasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
-if(tasks.length>keepLastCount){
-const sortedTasks=tasks.sort((a,b)=>(b.id||0)-(a.id||0));
-const keepTasks=sortedTasks.slice(0,keepLastCount);
-localStorage.setItem('upsrs_tasks_v3',JSON.stringify(keepTasks));
-console.log(`Cleaned up ${tasks.length-keepLastCount} old tasks`);
-return tasks.length-keepLastCount;
-}
-return 0;
-}catch(error){
-console.error('Cleanup error:',error);
-return 0;
-}
-},
-
-compressImageBase64(base64String,maxSize=50000){
-try{
-if(!base64String||!base64String.startsWith('data:image/'))return base64String;
-const canvas=document.createElement('canvas');
-const ctx=canvas.getContext('2d');
-const img=new Image();
-img.src=base64String;
-return new Promise((resolve)=>{
-img.onload=()=>{
-let width=img.width;
-let height=img.height;
-const maxSizePixels=800;
-if(width>height&&width>maxSizePixels){
-height*=maxSizePixels/width;
-width=maxSizePixels;
-}else if(height>maxSizePixels){
-width*=maxSizePixels/height;
-height=maxSizePixels;
-}
-canvas.width=width;
-canvas.height=height;
-ctx.drawImage(img,0,0,width,height);
-let compressed=canvas.toDataURL('image/jpeg',0.7);
-while(compressed.length>maxSize&&compressed.length>10000){
-const quality=0.7-0.1;
-compressed=canvas.toDataURL('image/jpeg',quality);
-}
-resolve(compressed);
-};
-img.onerror=()=>resolve(base64String);
-});
-}catch(error){
-console.error('Compression error:',error);
-return base64String;
-}
-},
-
-async safeStorageSet(key,data){
-try{
-const quota=this.checkStorageQuota();
-if(!quota.available){
-if(key==='upsrs_tasks_v3'){
-this.cleanupOldTasks(30);
-}
-throw new Error('Storage full');
-}
-const jsonString=JSON.stringify(data);
-if(jsonString.length>4*1024*1024){
-throw new Error('Data too large');
-}
-localStorage.setItem(key,jsonString);
-return true;
-}catch(error){
-console.error('Storage error:',error);
-if(error.message.includes('full')||error.message.includes('large')){
-alert('Penyimpanan lokal penuh. Data akan disimpan ke cloud saja.');
-return false;
-}
-return false;
-}
-},
-
-// Editing states
-editingUserProfile:{
-newName:'',
-newUsername:'',
-newPassword:'',
-newSpecialization:'',
-profile_photo:null
-},
+authName:'',
+authUsername:'',
+authPassword:'',
+authSpecialization:'',
+authProfilePhoto:null,
+showPass:false,
 
 filterPeriod:'all',
 
@@ -227,7 +99,7 @@ newUserProfile:{
 name:'',
 username:'',
 password:'',
-profile_photo:null
+profilePhoto:null
 },
 
 dataLokasi:{
@@ -244,257 +116,101 @@ dataLokasi:{
 savedTasks:[],
 registeredUsers:[],
 
-// State koneksi
-isOnline: navigator.onLine,
-
-// State user auth
-currentUser: JSON.parse(localStorage.getItem('current_user')),
-
-// State sync progress
-syncProgress: 0,
-isSyncing: false,
-
-// State UI
-showPass: false,
-
-// Debounce timer
-syncDebounceTimer: null,
-
-// App state
-appLoaded: false,
-hasError: false,
-errorMessage: '',
-
-// Fungsi init untuk listener
-init() {
-  window.addEventListener('online', () => {
-    this.isOnline = true;
-  });
-
-  window.addEventListener('offline', () => {
-    this.isOnline = false;
-  });
+// Missing properties for Alpine.js
+editingTask:null,
+editingUserProfile:{
+newName:'',
+newUsername:'',
+newPassword:'',
+newSpecialization:'',
+profile_photo:null
 },
 
-async initApp(){
-try{
+initApp(){
 console.log('🚀 Initializing UPSRS GO...');
-this.appLoaded = false;
-this.hasError = false;
-
-// Set timeout untuk prevent infinite loading
-const loadingTimeout = setTimeout(() => {
-  console.warn('⚠️ Loading timeout - forcing app to show');
-  this.appLoaded = true;
-}, 15000); // 15 detik timeout
-
-// Sync dari Supabase saat app dibuka
-console.log('🔄 Starting Supabase sync...');
-try {
-  await this.syncFromSupabase();
-  console.log('✅ Supabase sync completed');
-} catch (syncError) {
-  console.error('❌ Supabase sync failed, using fallback:', syncError);
-  // Force data dari localStorage sebagai fallback
-  this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
-  this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
-  this.tasks = [...this.savedTasks];
-}
-
 this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
 this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
+console.log('📊 Loaded users:', this.registeredUsers.length);
+console.log('📝 Loaded tasks:', this.savedTasks.length);
 
-// Isi tasks state dengan savedTasks
-this.tasks = [...this.savedTasks];
-
-const u=localStorage.getItem('current_user');
-if(u){
-this.currentUser=JSON.parse(u);
-// Check if current user is Super Admin and redirect to admin dashboard
-if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
-// Ensure data is loaded before redirect
-if(this.registeredUsers.length === 0){
-this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
-}
-if(this.savedTasks.length === 0){
-this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
-this.tasks = [...this.savedTasks];
-}
-this.page='adminDashboard';
-// Call the sync version of refreshAdminStats
-try{
-await this.syncFromSupabase();
-}catch(error){
-console.error('Sync failed during admin login:', error);
-}
-}else{
-this.page='dashboard';
-}
-}
-
-// Ensure Super Admin account always exists
+// Ensure Super Admin account always exists BEFORE sync
 const adminUser=this.registeredUsers.find(x=>x.username==='Admin');
 
 if(!adminUser){
-this.registeredUsers.push({id:999,name:'Super Admin',username:'Admin',password:'oTikaoke',role:'admin',profile_photo:null});
+this.registeredUsers.push({id:999,name:'Super Admin',username:'Admin',password:'oTikaoke',role:'admin',profilePhoto:null});
 localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
+console.log('👑 Created default Admin user');
+}else{
+console.log('👑 Admin user already exists:', adminUser);
 }
 
-// Mobile online detection and auto-sync
-if(navigator.userAgent.includes('Mobile')){
-window.addEventListener('online',()=>{
-console.log('Mobile device online - scheduling sync...');
-// Clear existing timer
-if(this.syncDebounceTimer){
-clearTimeout(this.syncDebounceTimer);
-}
-// Debounce sync untuk mencegah berlebihan
-this.syncDebounceTimer = setTimeout(() => {
-console.log('Executing debounced sync...');
-this.syncMobileTasks();
-}, 2000); // 2 detik delay
-});
-}
+// Sync from Supabase if available (but don't overwrite admin)
+this.syncFromSupabase();
 
-// Bersihkan data lama saat online
-if (this.isOnline) {
-this.cleanLocalTasks();
+const u=localStorage.getItem('upsrs_current_user');
+if(u){
+this.currentUser=JSON.parse(u);
+console.log('👤 Current user found:', this.currentUser?.username, 'Role:', this.currentUser?.role);
+// Check if current user is Super Admin and redirect to admin dashboard
+if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
+this.page='adminDashboard';
+console.log('👑 Redirecting to admin dashboard');
+}else{
+this.page='dashboard';
+console.log('👤 Redirecting to user dashboard');
 }
-
-// Clear timeout jika berhasil
-clearTimeout(loadingTimeout);
+}else{
+console.log('🔓 No current user found');
+}
 
 console.log('✅ UPSRS GO initialized successfully');
-this.appLoaded = true;
-}catch(error){
-console.error('❌ Failed to initialize UPSRS GO:', error);
-this.hasError = true;
-this.errorMessage = 'Gagal memuat aplikasi: ' + error.message;
-this.appLoaded = true; // Hide loading
-}
 },
 
-async syncMobileTasks(){
-try{
-// Prevent duplicate sync
-if(this.isSyncing){
-console.log('Sync already in progress, skipping...');
-return;
-}
-
-this.isSyncing = true;
-this.syncProgress = 0;
-
-const unsynced = this.tasks.filter(t => !t.synced_at);
-const total = unsynced.length;
-
-if (total === 0) {
-console.log('No unsynced tasks found');
-this.isSyncing = false;
-return;
-}
-
-console.log(`Syncing ${total} unsynced tasks...`);
-
-for (let i = 0; i < total; i++) {
-const task = unsynced[i];
-
-const { error } = await window.supabaseClient
-.from('tasks')
-.insert([task]);
-
-if (!error) {
-const now = new Date().toISOString();
-task.synced_at = now;
-
-this.lastSyncTime = now;
-localStorage.setItem('last_sync_time', now);
-console.log('Task synced successfully:', task.id);
-} else {
-console.error('Failed to sync task:', task.id, error);
-}
-
-this.syncProgress = Math.round(((i + 1) / total) * 100);
-}
-
-// Update localStorage dengan synced tasks
-await this.safeStorageSet('upsrs_tasks_v3', this.tasks);
-this.cleanLocalTasks();
-this.isSyncing = false;
-console.log('Mobile sync completed');
-} catch (error) {
-console.error('Mobile sync error:', error);
-this.isSyncing = false;
-}
-},
-
-// Sync data dari Supabase ke localStorage
+// Sync data from Supabase
 async syncFromSupabase(){
-try{
-// Pastikan supabaseClient tersedia
-if(!window.supabaseClient){
-console.warn('⚠️ Supabase client not available, using localStorage only');
-// Fallback ke localStorage
-this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
-this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
-return;
+if (!window.supabaseClient) {
+  console.log('📊 Supabase not available, using localStorage only');
+  return;
 }
 
-console.log('🔄 Syncing from Supabase...');
+try {
+  console.log('🔄 Syncing from Supabase...');
+  
+  // Sync users (but preserve local admin)
+  const { data: users, error: usersError } = await window.supabaseClient
+    .from('users')
+    .select('*');
+    
+  if (!usersError && users) {
+    // Preserve local admin user
+    const localAdmin = this.registeredUsers.find(x => x.username === 'Admin');
+    
+    // Merge users from Supabase with local admin
+    this.registeredUsers = [
+      localAdmin, // Always keep local admin first
+      ...users.filter(u => u.username !== 'Admin') // Add Supabase users except admin
+    ].filter(Boolean); // Remove null/undefined
+    
+    localStorage.setItem('upsrs_users_v3', JSON.stringify(this.registeredUsers));
+    console.log('✅ Users synced from Supabase:', this.registeredUsers.length);
+  }
 
-// Sync users dengan error handling
-try{
-const { data: users, error: usersError } = await window.supabaseClient.from('users').select('*');
-if(usersError){
-console.warn('⚠️ Users table not found, using localStorage:', usersError);
-this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
-}else if(users){
-this.registeredUsers=users;
-localStorage.setItem('upsrs_users_v3',JSON.stringify(users));
-console.log('✅ Users synced from Supabase:', users.length);
-}
-}catch(err){
-console.warn('⚠️ Error syncing users, using localStorage:', err);
-this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
-}
+  // Sync tasks
+  const { data: tasks, error: tasksError } = await window.supabaseClient
+    .from('tasks')
+    .select('*')
+    .order('created_at', { ascending: false });
+    
+  if (!tasksError && tasks) {
+    this.savedTasks = tasks;
+    localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+    console.log('✅ Tasks synced from Supabase:', tasks.length);
+  }
 
-// Sync tasks dengan error handling
-try{
-const { data: tasks, error: tasksError } = await window.supabaseClient.from('tasks').select('*').order('id', { ascending: false });
-if(tasksError){
-console.warn('⚠️ Tasks table not found, using localStorage:', tasksError);
-this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
-}else if(tasks){
-this.savedTasks=tasks;
-this.tasks = [...tasks]; // Update tasks state
-localStorage.setItem('upsrs_tasks_v3',JSON.stringify(tasks));
-console.log('✅ Tasks synced from Supabase:', tasks.length);
+  console.log('✅ Sync from Supabase completed');
+} catch (error) {
+  console.warn('⚠️ Sync from Supabase failed:', error);
 }
-}catch(err){
-console.warn('⚠️ Error syncing tasks, using localStorage:', err);
-this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
-}
-
-console.log('✅ Sync from Supabase completed');
-}catch(error){
-console.error('❌ Sync error:', error);
-// Fallback ke localStorage
-this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
-this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
-}
-},
-// Refresh admin statistics
-async refreshAdminStats(){
-const now = dayjs();
-const allTasks = this.savedTasks;
-
-this.adminStats = {
-todayTasks: allTasks.filter(t => dayjs(t.tanggal, 'DD/MM/YYYY').isSame(now, 'day')).length,
-weeklyTasks: allTasks.filter(t => dayjs(t.tanggal, 'DD/MM/YYYY').isAfter(now.subtract(7, 'day'))).length,
-thisWeekCompleted: allTasks.filter(t => dayjs(t.tanggal, 'DD/MM/YYYY').isAfter(now.subtract(7, 'day')) && t.statusPekerjaan === 'Selesai').length,
-monthlyTasks: allTasks.filter(t => dayjs(t.tanggal, 'DD/MM/YYYY').isSame(now, 'month')).length,
-thisMonthCompleted: allTasks.filter(t => dayjs(t.tanggal, 'DD/MM/YYYY').isSame(now, 'month') && t.statusPekerjaan === 'Selesai').length
-};
 },
 
 // Delete all registered accounts
@@ -502,7 +218,7 @@ deleteAllAccounts(){
 if(!confirm('Apakah Anda yakin ingin menghapus SEMUA akun yang terdaftar? Tindakan ini tidak dapat dibatalkan!'))return;
 this.registeredUsers=[];
 localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
-localStorage.removeItem('current_user');
+localStorage.removeItem('upsrs_current_user');
 this.currentUser=null;
 this.page='login';
 alert('Semua akun telah dihapus!');
@@ -510,19 +226,30 @@ alert('Semua akun telah dihapus!');
 
 get filteredTasks(){
 try{
+// Return empty array if no current user
+if(!this.currentUser){
+return [];
+}
+
 // Super Admin can see all tasks, regular users only see their own
 if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
 return this.getAllUserTasks();
 }
-
 // Regular users only see their own tasks
-if (this.currentUser?.role !== 'admin') {
-  return this.savedTasks.filter(t => t.user_id === this.currentUser.id);
-}
-
-return this.savedTasks;
+const currentUserId = this.currentUser.id || this.currentUser.username;
+if(this.filterPeriod==='all')return this.savedTasks.filter(t=>t.user_id===currentUserId);
+const now=dayjs();
+return this.savedTasks.filter(t=>{
+const d=dayjs(t.tanggal,'DD/MM/YYYY');
+if(!d.isValid())return false;
+if(t.user_id!==currentUserId)return false; // Only user's own tasks
+if(this.filterPeriod==='today')return d.isSame(now,'day');
+if(this.filterPeriod==='week')return d.isAfter(now.subtract(7,'day'));
+if(this.filterPeriod==='month')return d.isSame(now,'month');
+return false;
+});
 }catch(error){
-console.error('Error in filteredTasks:', error);
+console.error('❌ Error in filteredTasks:', error);
 return [];
 }
 },
@@ -535,276 +262,181 @@ pending:this.filteredTasks.filter(t=>t.statusPekerjaan==='Belum Selesai').length
 }
 },
 
-// Get user statistics for admin dashboard
-getUserStats(userId){
-const user = this.registeredUsers.find(u => u.id === userId);
-if(!user) return { totalTasks: 0, completedTasks: 0, pendingTasks: 0 };
-const userTasks = this.savedTasks.filter(t => t.user_id === user.id);
-return{
-totalTasks:userTasks.length,
-completedTasks:userTasks.filter(t=>t.statusPekerjaan==='Selesai').length,
-pendingTasks:userTasks.filter(t=>t.statusPekerjaan==='Belum Selesai').length
-}
-},
-
-// Safe wrapper for getUserStats
-safeGetUserStats(userId){
-try{
-return this.getUserStats(userId);
-}catch(error){
-console.error('Error getting user stats:', error);
-return { totalTasks: 0, completedTasks: 0, pendingTasks: 0 };
-}
-},
-
 async handleLogin(){
-if(!this.authUsername||!this.authPassword)return alert('Isi username dan password!');
+  if(!this.authUsername || !this.authPassword)
+    return alert('Isi username dan password!');
 
-try{
-// Force sync dulu untuk mendapatkan data terbaru dari Supabase
-await this.syncFromSupabase();
+  // Try Supabase first if available
+  if (window.supabaseClient) {
+    try {
+      const { data, error } = await supabaseClient
+        .from('users')
+        .select('*')
+        .eq('username', this.authUsername)
+        .eq('password', this.authPassword)
+        .single();
 
-// Coba login via Supabase dulu (untuk semua device)
-if(window.supabaseClient){
-console.log('Trying login via Supabase...');
-const { data: u, error } = await window.supabaseClient
-.from('users')
-.select('*')
-.eq('username', this.authUsername)
-.eq('password', this.authPassword)
-.single();
+      if (!error && data) {
+        this.currentUser = data;
+        localStorage.setItem('upsrs_current_user', JSON.stringify(data));
+        this.page = data.role === 'admin' ? 'adminDashboard' : 'dashboard';
+        this.authUsername = '';
+        this.authPassword = '';
+        return;
+      }
+    } catch (supabaseError) {
+      console.warn('Supabase login failed, trying fallback:', supabaseError);
+    }
+  }
 
-if(!error && u){
-console.log('Login successful via Supabase:', u);
-this.currentUser = u;
-localStorage.setItem('current_user', JSON.stringify(u));
-this.page = u.role === 'admin' ? 'adminDashboard' : 'dashboard';
-this.authUsername='';
-this.authPassword='';
-return;
-}else if(error){
-console.log('Supabase login error:', error);
-}
-}
+  // Fallback to localStorage
+  const u = this.registeredUsers.find(x => x.username === this.authUsername && x.password === this.authPassword);
+  if (!u) {
+    return alert('Login gagal! Periksa username dan password.');
+  }
 
-// Fallback ke localStorage
-console.log('Trying login via localStorage...');
-const u=this.registeredUsers.find(x=>x.username===this.authUsername&&x.password===this.authPassword);
-if(!u){
-if(navigator.userAgent.includes('Mobile')){
-return alert('Login gagal! Periksa koneksi internet dan coba lagi.');
-}else{
-return alert('Login gagal! Periksa username dan password atau coba refresh halaman.');
-}
-}
-
-console.log('Login successful via localStorage:', u);
-this.currentUser=u;
-localStorage.setItem('current_user',JSON.stringify(u));
-// Check if admin and redirect to admin dashboard
-this.page = u.role === 'admin' ? 'adminDashboard' : 'dashboard';
-this.authUsername='';
-this.authPassword='';
-
-// Sync user data ke Supabase untuk backup
-if(window.supabaseClient){
-try{
-await window.supabaseClient
-.from('users')
-.upsert([u]);
-console.log('User synced to Supabase');
-}catch(syncError){
-console.log('Sync to Supabase failed, but login successful');
-}
-}
-
-}catch(error){
-console.error('Login error:', error);
-// Final fallback ke localStorage
-const u=this.registeredUsers.find(x=>x.username===this.authUsername&&x.password===this.authPassword);
-if(u){
-this.currentUser=u;
-localStorage.setItem('current_user',JSON.stringify(u));
-this.page='dashboard';
-this.authUsername='';
-this.authPassword='';
-alert('Login berhasil (offline mode).');
-}else{
-alert('Login gagal! Periksa username dan password.');
-}
-}
+  this.currentUser = u;
+  localStorage.setItem('upsrs_current_user', JSON.stringify(u));
+  this.page = u.role === 'admin' ? 'adminDashboard' : 'dashboard';
+  this.authUsername = '';
+  this.authPassword = '';
 },
 
-handleRegister(){
-if(!this.authName||!this.authUsername||!this.authPassword)return alert('Lengkapi data!');
-if(this.registeredUsers.find(x=>x.username===this.authUsername))return alert('Username sudah ada!');
+async handleRegister(){
+  if(!this.authName || !this.authUsername || !this.authPassword)
+    return alert('Lengkapi data!');
 
-const newUser={
-id:Date.now(),
-name:this.authName,
-username:this.authUsername,
-password:this.authPassword,
-role:'user',
-specialization:this.authSpecialization||'',
-profile_photo:this.authProfilePhoto||null
-};
+  // Try Supabase first if available
+  if (window.supabaseClient) {
+    try {
+      const newUser = {
+        id: Date.now(), // Add required ID
+        name: this.authName,
+        username: this.authUsername,
+        password: this.authPassword,
+        role: 'user',
+        specialization: this.authSpecialization || '',
+        profile_photo: this.authProfilePhoto
+      };
 
-// Simpan ke localStorage dulu (immediate)
-this.registeredUsers.push(newUser);
-localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
+      console.log('🔄 Registering user to Supabase:', newUser);
+      
+      const { error } = await window.supabaseClient
+        .from('users')
+        .insert([newUser]);
 
-// Simpan ke Supabase (async) untuk semua device
-this.saveUserToSupabase(newUser);
+      if(error){
+        throw error;
+      }
 
-alert('Daftar berhasil! Silahkan login');
-this.page='login';
-this.authName='';
-this.authUsername='';
-this.authPassword='';
-this.authSpecialization='';
-this.authProfilePhoto=null;
-},
+      console.log('✅ User registered to Supabase successfully');
+      alert('Daftar berhasil! (Tersimpan di Cloud) Silakan login');
+      this.page='login';
+      this.authName='';
+      this.authUsername='';
+      this.authPassword='';
+      return;
+    } catch (supabaseError) {
+      console.warn('❌ Supabase registration failed, using fallback:', supabaseError);
+      alert('⚠️ Gagal simpan ke cloud, menggunakan mode offline');
+    }
+  }
 
-async saveUserToSupabase(user){
-try{
-if(!window.supabaseClient){
-console.error('Supabase client not available');
-return;
-}
+  // Fallback to localStorage
+  const newUser = {
+    id: Date.now(),
+    name: this.authName,
+    username: this.authUsername,
+    password: this.authPassword,
+    role: 'user',
+    specialization: this.authSpecialization || '',
+    profile_photo: this.authProfilePhoto
+  };
 
-console.log('Saving user to Supabase:', user);
+  this.registeredUsers.push(newUser);
+  localStorage.setItem('upsrs_users_v3', JSON.stringify(this.registeredUsers));
 
-// Cek apakah user sudah ada di Supabase
-const { data: existingUser, error: checkError } = await window.supabaseClient
-.from('users')
-.select('*')
-.eq('username', user.username)
-.single();
-
-if(checkError && checkError.code !== 'PGRST116'){
-console.error('Error checking existing user:', checkError);
-}
-
-if(existingUser){
-console.log('User already exists in Supabase:', existingUser);
-return;
-}
-
-// Simpan user baru ke Supabase
-const { data, error } = await window.supabaseClient
-.from('users')
-.insert([user]);
-
-if(error){
-console.error('Error saving user to Supabase:', error);
-if(error.code === '23514'){
-alert('Error: Role tidak valid. Menggunakan fallback localStorage.');
-}else if(error.code === '23505'){
-alert('Username sudah ada di database. Gunakan username lain.');
-}else{
-alert('Gagal menyimpan ke cloud: ' + error.message);
-}
-}else{
-console.log('User berhasil disimpan ke Supabase:', data);
-// Force sync untuk memastikan data terupdate
-setTimeout(() => {
-this.syncFromSupabase();
-}, 1000);
-}
-}catch(error){
-console.error('Error saving user to Supabase:', error);
-alert('Terjadi kesalahan saat menyimpan ke cloud. Data tersimpan di localStorage.');
-}
+  console.log('✅ User registered to localStorage:', newUser);
+  alert('Daftar berhasil! (Mode Offline) Silakan login');
+  this.page='login';
+  this.authName='';
+  this.authUsername='';
+  this.authPassword='';
 },
 
 async handleAdminLogin(){
-if(!this.authUsername||!this.authPassword)return alert('Isi username dan password admin!');
+  if(!this.authUsername||!this.authPassword)return alert('Isi username dan password admin!');
 
-try{
-// Try admin login via Supabase first for desktop
-if(!navigator.userAgent.includes('Mobile') && window.supabaseClient){
-const { data: u, error } = await window.supabaseClient
-.from('users')
-.select('*')
-.eq('username', this.authUsername)
-.eq('password', this.authPassword)
-.eq('role', 'admin')
-.single();
+  console.log('🔑 Trying admin login:', this.authUsername);
 
-if(!error && u){
-this.currentUser = u;
-localStorage.setItem('current_user', JSON.stringify(u));
-this.page = 'adminDashboard';
-this.authUsername='';
-this.authPassword='';
-return;
-}
-}
+  // Try Supabase first if available
+  if (window.supabaseClient) {
+    try {
+      console.log('🔄 Checking Supabase for admin user...');
+      const { data, error } = await window.supabaseClient
+        .from('users')
+        .select('*')
+        .eq('username', this.authUsername)
+        .eq('password', this.authPassword)
+        .eq('role', 'admin')
+        .single();
 
-// Fallback to localStorage
-const u=this.registeredUsers.find(x=>x.username===this.authUsername&&x.password===this.authPassword&&x.role==='admin');
-if(!u){
-if(navigator.userAgent.includes('Mobile')){
-return alert('Login admin gagal! Periksa koneksi internet dan coba lagi.');
-}else{
-return alert('Login admin gagal! Periksa kredensial Anda.');
-}
-}
+      console.log('📊 Supabase admin query result:', { data, error });
 
-this.currentUser=u;
-localStorage.setItem('current_user',JSON.stringify(u));
-this.page='adminDashboard';
-this.authUsername='';
-this.authPassword='';
+      if(!error && data) {
+        console.log('✅ Admin login successful via Supabase:', data);
+        this.currentUser = data;
+        localStorage.setItem('upsrs_current_user', JSON.stringify(data));
+        this.page='adminDashboard';
+        this.authUsername='';
+        this.authPassword='';
+        return;
+      } else if (error) {
+        console.warn('⚠️ Supabase admin login error:', error);
+      }
+    } catch (supabaseError) {
+      console.warn('❌ Supabase admin login failed, trying fallback:', supabaseError);
+    }
+  }
 
-// Sync admin data to Supabase for desktop
-if(!navigator.userAgent.includes('Mobile') && window.supabaseClient){
-try{
-await window.supabaseClient
-.from('users')
-.upsert([u]);
-console.log('Admin synced to Supabase');
-}catch(syncError){
-console.log('Sync to Supabase failed, but admin login successful');
-}
-}
+  // Fallback to localStorage
+  console.log('🔄 Checking localStorage for admin user...');
+  console.log('📋 Available users:', this.registeredUsers);
+  
+  const u = this.registeredUsers.find(x => 
+    x.username === this.authUsername && 
+    x.password === this.authPassword && 
+    x.role === 'admin'
+  );
+  
+  console.log('👤 Found admin user in localStorage:', u);
 
-}catch(error){
-console.error('Admin login error:', error);
-// Final fallback to localStorage
-const u=this.registeredUsers.find(x=>x.username===this.authUsername&&x.password===this.authPassword&&x.role==='admin');
-if(u){
-this.currentUser=u;
-localStorage.setItem('current_user',JSON.stringify(u));
-this.page='adminDashboard';
-this.authUsername='';
-this.authPassword='';
-alert('Login admin berhasil (offline mode).');
-}else{
-alert('Login admin gagal! Periksa kredensial Anda.');
-}
-}
+  if (!u) {
+    console.error('❌ Admin login failed - user not found');
+    return alert('Login admin gagal! Periksa username/password atau coba refresh halaman.');
+  }
+
+  console.log('✅ Admin login successful via localStorage:', u);
+  this.currentUser = u;
+  localStorage.setItem('upsrs_current_user', JSON.stringify(u));
+  this.page='adminDashboard';
+  this.authUsername='';
+  this.authPassword='';
 },
 
 handleFileUpload(e){
 const f=e.target.files[0];
 if(!f)return;
 const r=new FileReader();
-r.onload=async (ev)=>{
+r.onload=ev=>{
 const img=new Image();
-img.onload=async ()=>{
+img.onload=()=>{
 const canvas=document.createElement('canvas');
 const ctx=canvas.getContext('2d');
 canvas.width=img.width;
 canvas.height=img.height;
 ctx.drawImage(img,0,0,img.width,img.height);
-const originalSize=canvas.toDataURL('image/jpeg',0.9).length;
-if(originalSize>100000){
-this.newTask.foto=await this.compressImageBase64(canvas.toDataURL('image/jpeg',0.9),50000);
-}else{
 this.newTask.foto=canvas.toDataURL('image/jpeg',0.9);
-}
-console.log(`Image compressed: ${originalSize} -> ${this.newTask.foto.length} bytes`);
 };
 img.src=ev.target.result;
 };
@@ -857,113 +489,118 @@ ctx.drawImage(canvas,0,0);
 
 const finalPhoto=canvas.toDataURL('image/jpeg',0.95);
 this.authProfilePhoto=finalPhoto;
-this.newUserProfile.profile_photo=finalPhoto;
+this.newUserProfile.profilePhoto=finalPhoto;
 };
 img.src=ev.target.result;
 };
 r.readAsDataURL(f);
 },
 
-async simpanTugas(){
-if(!this.newTask.masalah||!this.newTask.masalah.trim())return alert('Isi Permasalahan Utama!');
-if(!this.newTask.gedung)return alert('Pilih Gedung!');
-if(!this.newTask.ruangan)return alert('Pilih Ruangan!');
-const tindakan=this.newTask.statusPekerjaan==='Selesai'?this.newTask.penyelesaian:this.newTask.alasanPending;
-if(!tindakan||!tindakan.trim())return alert('Isi Penyelesaian atau Alasan Pending!');
+async simpanTugas() {
+  if (!this.newTask.masalah?.trim()) return alert('Isi Permasalahan Utama!');
+  if (!this.newTask.gedung) return alert('Pilih Gedung!');
+  if (!this.newTask.ruangan) return alert('Pilih Ruangan!');
 
-const entry={
-id:Date.now(),
-tanggal:dayjs().format('DD/MM/YYYY'),
-waktu:dayjs().format('HH:mm'),
-teknisi:this.currentUser.name,
-user_id: this.currentUser.id,
-gedung:this.newTask.gedung,
-ruangan:this.newTask.ruangan,
-pelapor:this.newTask.pelapor||'',
-masalah:this.newTask.masalah,
-penyelesaian:this.newTask.statusPekerjaan==='Selesai'?this.newTask.penyelesaian:this.newTask.alasanPending,
-statusPekerjaan:this.newTask.statusPekerjaan,
-foto:this.newTask.foto||null
-};
+  const tindakan = this.newTask.statusPekerjaan === 'Selesai'
+    ? this.newTask.penyelesaian
+    : this.newTask.alasanPending;
 
-    try {
-        // Check internet connection for mobile
-        if(navigator.userAgent.includes('Mobile') && !navigator.onLine){
-            // Fallback to localStorage for offline mobile
-            this.savedTasks.unshift(entry);
-            this.tasks.unshift(entry); // Update tasks state
-            await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
-            alert('Laporan tersimpan di perangkat (offline). Akan sinkronisasi saat online.');
-            this.resetTaskForm();
-            return;
-        }
+  if (!tindakan?.trim()) return alert('Isi Penyelesaian / Alasan Pending!');
 
-        // Mengirim data ke tabel 'tasks' di database Supabase
-        const { data, error } = await window.supabaseClient
-            .from('tasks') 
-            .insert([entry]);
+  try {
+    let fotoUrl = null;
 
-        if (!error) {
-            const now = new Date().toISOString();
-            entry.synced_at = now;
-
-            this.lastSyncTime = now;
-            localStorage.setItem('last_sync_time', now);
-        }
-
-        if (error) {
-            // Fallback untuk mobile jika Supabase error
-            if(navigator.userAgent.includes('Mobile')){
-                this.savedTasks.unshift(entry);
-                this.tasks.unshift(entry); // Update tasks state
-                await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
-                alert('Gagal menyimpan ke cloud. Laporan tersimpan di perangkat dan akan sinkronisasi nanti.');
-                this.resetTaskForm();
-                return;
-            }
-            throw error;
-        }
-
-        // Update tasks state saat berhasil
-        this.savedTasks.unshift(entry);
-        this.tasks.unshift(entry);
-        await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
-
-        alert('Laporan berhasil disimpan ke Supabase!');
-        this.resetTaskForm();
-
-    } catch (err) {
-        console.error('Error:', err);
+    /* ================= UPLOAD FOTO KE SUPABASE STORAGE ================= */
+    if (this.newTask.foto && window.supabaseClient) {
+      try {
+        const fileName = `task_${Date.now()}_${this.currentUser.username}.jpg`;
         
-        // Mobile fallback
-        if(navigator.userAgent.includes('Mobile')){
-            this.savedTasks.unshift(entry);
-            this.tasks.unshift(entry); // Update tasks state
-            await this.safeStorageSet('upsrs_tasks_v3', this.savedTasks);
-            alert('Terjadi error. Laporan tersimpan di perangkat dan akan sinkronisasi nanti.');
-            this.resetTaskForm();
-            return;
-        }
+        // Convert base64 to blob
+        const blob = this.base64ToBlob(this.newTask.foto);
         
-        alert('Gagal menyimpan: ' + err.message);
+        const { error: uploadError } = await window.supabaseClient.storage
+          .from('task-photos')
+          .upload(fileName, blob, {
+            contentType: 'image/jpeg',
+            upsert: true
+          });
+
+        if (uploadError) throw uploadError;
+
+        const { data } = window.supabaseClient.storage
+          .from('task-photos')
+          .getPublicUrl(fileName);
+
+        fotoUrl = data.publicUrl;
+        console.log('✅ Photo uploaded to Supabase:', fotoUrl);
+      } catch (photoError) {
+        console.warn('⚠️ Photo upload failed, using base64:', photoError);
+        fotoUrl = this.newTask.foto; // Fallback to base64
+      }
+    } else if (this.newTask.foto) {
+      fotoUrl = this.newTask.foto; // Base64 for offline mode
     }
 
-    // Refresh admin stats if Super Admin is logged in
-    if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
-        this.refreshAdminStats();
-    }
-},
-
-resetTaskForm(){
-    // Mengosongkan form kembali setelah berhasil
-    this.newTask = {
-        gedung: '', ruangan: '', pelapor: '', masalah: '', 
-        penyelesaian: '', statusPekerjaan: 'Selesai', 
-        alasanPending: '', foto: null
+    /* ================= SIMPAN KE DATABASE ================= */
+    const entry = {
+      id: Date.now(),
+      user_id: this.currentUser.id || this.currentUser.username,
+      tanggal: dayjs().format('DD/MM/YYYY'),
+      waktu: dayjs().format('HH:mm'),
+      teknisi: this.currentUser.name,
+      gedung: this.newTask.gedung,
+      ruangan: this.newTask.ruangan,
+      pelapor: this.newTask.pelapor || '',
+      masalah: this.newTask.masalah,
+      penyelesaian: tindakan,
+      statusPekerjaan: this.newTask.statusPekerjaan,
+      foto: fotoUrl
     };
-    
-    // Memperbarui tampilan aplikasi
-    if (typeof this.initApp === 'function') this.initApp();
+
+    // Try Supabase first
+    if (window.supabaseClient) {
+      try {
+        const { error } = await window.supabaseClient
+          .from('tasks')
+          .insert([entry]);
+
+        if (error) throw error;
+
+        console.log('✅ Task saved to Supabase:', entry);
+        alert('✅ Laporan berhasil disimpan (Cloud)');
+      } catch (supabaseError) {
+        console.warn('❌ Supabase save failed, using localStorage:', supabaseError);
+        
+        // Fallback to localStorage
+        this.savedTasks.push(entry);
+        localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+        console.log('✅ Task saved to localStorage:', entry);
+        alert('✅ Laporan berhasil disimpan (Mode Offline)');
+      }
+    } else {
+      // Offline mode - save to localStorage
+      this.savedTasks.push(entry);
+      localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+      console.log('✅ Task saved to localStorage:', entry);
+      alert('✅ Laporan berhasil disimpan (Mode Offline)');
+    }
+
+    /* ================= RESET FORM ================= */
+    this.newTask = {
+      gedung: '',
+      ruangan: '',
+      pelapor: '',
+      masalah: '',
+      penyelesaian: '',
+      statusPekerjaan: 'Selesai',
+      alasanPending: '',
+      foto: null
+    };
+
+  } catch (err) {
+    console.error('❌ Error saving task:', err);
+    alert('❌ Gagal menyimpan laporan: ' + err.message);
+  }
 },
 
 async exportToExcel(){
@@ -1027,7 +664,7 @@ this.isExporting=false;
 },
 
 logout(){
-localStorage.removeItem('current_user');
+localStorage.removeItem('upsrs_current_user');
 this.currentUser=null;
 this.page='login';
 },
@@ -1037,46 +674,31 @@ get isAdmin(){
 return this.currentUser?.role==='admin';
 },
 
-get regularUsers(){
-// Filter user biasa (bukan admin)
-return this.registeredUsers.filter(u=>u.role!=='admin');
+async fetchUsers(){
+  // Skip if Supabase is not available (offline mode)
+  if (!window.supabaseClient) {
+    console.log('📊 Using localStorage for users (offline mode)');
+    return;
+  }
+
+  try {
+    const { data, error } = await window.supabaseClient
+      .from('users')
+      .select('*')
+      .neq('role','admin');
+
+    if(!error && data){
+      this.registeredUsers = data;
+      localStorage.setItem('upsrs_users_v3', JSON.stringify(this.registeredUsers));
+      console.log('✅ Users fetched from Supabase:', data.length);
+    }
+  } catch (error) {
+    console.warn('⚠️ Failed to fetch users from Supabase, using localStorage:', error);
+  }
 },
 
-get adminStats(){
-try{
-console.log('🔍 Computing adminStats...');
-console.log('📊 Regular users:', this.regularUsers.length);
-console.log('📝 Saved tasks:', this.savedTasks.length);
-const allTasks=this.getAllUserTasks();
-console.log('👥 All user tasks:', allTasks.length);
-const now=dayjs();
-const stats={
-totalTasks:allTasks.length,
-totalUsers:this.regularUsers.length,
-completedTasks:allTasks.filter(t=>t.statusPekerjaan==='Selesai').length,
-pendingTasks:allTasks.filter(t=>t.statusPekerjaan==='Belum Selesai').length,
-todayTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'day')).length,
-weeklyTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
-monthlyTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length,
-thisWeekCompleted:allTasks.filter(t=>t.statusPekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
-thisMonthCompleted:allTasks.filter(t=>t.statusPekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length
-};
-console.log('✅ Admin stats computed:', stats);
-return stats;
-}catch(error){
-console.error('❌ Error in adminStats:', error);
-return{
-totalTasks:0,
-totalUsers:0,
-completedTasks:0,
-pendingTasks:0,
-todayTasks:0,
-weeklyTasks:0,
-monthlyTasks:0,
-thisWeekCompleted:0,
-thisMonthCompleted:0
-}
-}
+get regularUsers(){
+  return this.registeredUsers.filter(u=>u.role!=='admin');
 },
 
 getAllUserTasks(){
@@ -1086,7 +708,7 @@ console.log('📊 Registered users:', this.registeredUsers.length);
 const allTasks=[];
 this.regularUsers.forEach(user=>{
 console.log(`👤 Processing user: ${user.name} (${user.id})`);
-const userTasks=this.savedTasks.filter(task=>task.user_id===user.id);
+const userTasks=this.savedTasks.filter(task=>task.user_id===user.id || task.user_id===user.username);
 console.log(`📝 Tasks for ${user.name}:`, userTasks.length);
 userTasks.forEach(task=>{
 allTasks.push({...task,userProfile:user.profile_photo,userRole:user.role});
@@ -1104,6 +726,64 @@ return sorted;
 console.error('❌ Error in getAllUserTasks:', error);
 return [];
 }
+},
+
+// Get user statistics for admin dashboard
+getUserStats(userId){
+const user = this.registeredUsers.find(u => u.id === userId);
+if(!user) return { totalTasks: 0, completedTasks: 0, pendingTasks: 0 };
+const userTasks = this.savedTasks.filter(t => t.user_id===user.id || t.user_id===user.username);
+return{
+totalTasks:userTasks.length,
+completedTasks:userTasks.filter(t=>t.statusPekerjaan==='Selesai').length,
+pendingTasks:userTasks.filter(t=>t.statusPekerjaan==='Belum Selesai').length
+}
+},
+
+// Admin statistics getter
+get adminStats(){
+try{
+const allTasks=this.getAllUserTasks();
+const now=dayjs();
+return{
+todayTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'day')).length,
+weeklyTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
+thisWeekCompleted:allTasks.filter(t=>t.statusPekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
+monthlyTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length,
+thisMonthCompleted:allTasks.filter(t=>t.statusPekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length
+};
+}catch(error){
+console.error('Error in adminStats:', error);
+return{
+todayTasks:0,
+weeklyTasks:0,
+thisWeekCompleted:0,
+monthlyTasks:0,
+thisMonthCompleted:0
+}
+}
+},
+
+getAdminStats(){
+const allTasks=this.getAllUserTasks();
+const now=dayjs();
+return{
+totalTasks:allTasks.length,
+totalUsers:this.regularUsers.length,
+completedTasks:allTasks.filter(t=>t.statusPekerjaan==='Selesai').length,
+pendingTasks:allTasks.filter(t=>t.statusPekerjaan==='Belum Selesai').length,
+todayTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'day')).length,
+weeklyTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
+monthlyTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length,
+thisWeekCompleted:allTasks.filter(t=>t.statusPekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
+thisMonthCompleted:allTasks.filter(t=>t.statusPekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length
+};
+},
+
+// Force refresh admin stats
+refreshAdminStats(){
+// This function will be called to force reactivity
+return this.getAdminStats();
 },
 
 // Enhanced export for admin
@@ -1299,6 +979,18 @@ this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
 alert('Daftar user berhasil diperbarui!');
 },
 
+// View user profile (simple view)
+viewUserProfile(user){
+this.viewingUser=user;
+this.page='profile';
+},
+
+// View current user's own profile
+viewMyProfile(){
+this.viewingUser=this.currentUser;
+this.page='profile';
+},
+
 // View user profile with all tasks
 viewUserProfileWithTasks(user){
 this.viewingUser=user;
@@ -1347,47 +1039,6 @@ const dateA=dayjs(a.tanggal,'DD/MM/YYYY');
 const dateB=dayjs(b.tanggal,'DD/MM/YYYY');
 return dateB.isAfter(dateA)?1:-1;
 });
-},
-
-// Fungsi pembersih localStorage
-cleanLocalTasks() {
-  this.tasks = this.tasks.filter(task => !task.synced_at);
-  localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.tasks));
-},
-
-// Fungsi Sync Sekarang untuk manual sync
-async syncNow() {
-  if (!navigator.onLine) {
-    alert('❌ Tidak ada koneksi internet');
-    return;
-  }
-
-  try {
-    await this.syncMobileTasks();
-    await this.syncFromSupabase();
-    this.cleanLocalTasks();
-
-    const now = new Date().toISOString();
-    this.lastSyncTime = now;
-    localStorage.setItem('last_sync_time', now);
-
-    alert('✅ Sinkronisasi selesai');
-  } catch (err) {
-    console.error(err);
-    alert('❌ Gagal sinkronisasi');
-  }
-},
-
-// Refresh user list dari Supabase
-async refreshUserList(){
-try{
-console.log('Refreshing user list from Supabase...');
-await this.syncFromSupabase();
-alert('Daftar user berhasil diperbarui!');
-}catch(error){
-console.error('Error refreshing user list:', error);
-alert('Gagal memperbarui daftar user. Silakan coba lagi.');
-}
 },
 
 deleteUser(userId){
@@ -1447,69 +1098,80 @@ window.open(whatsappUrl,'_blank');
 },
 
 // Profile Management
-updateProfile(){
+async updateProfile(){
 if(!this.newUserProfile.name||!this.newUserProfile.username||!this.newUserProfile.password){
 return alert('Lengkapi semua data!');
 }
 
-const userIndex=this.registeredUsers.findIndex(u=>u.id===this.currentUser.id);
-if(userIndex!==-1){
-this.registeredUsers[userIndex]={
-...this.registeredUsers[userIndex],
-name:this.newUserProfile.name,
-username:this.newUserProfile.username,
-password:this.newUserProfile.password,
-profile_photo:this.newUserProfile.profile_photo
-};
+try{
+  // Try Supabase first if available
+  if (window.supabaseClient) {
+    const { error } = await window.supabaseClient
+      .from('users')
+      .update({
+        name:this.newUserProfile.name,
+        username:this.newUserProfile.username,
+        password:this.newUserProfile.password,
+        specialization:this.newUserProfile.specialization || '',
+        profile_photo:this.newUserProfile.profilePhoto
+      })
+      .eq('id', this.currentUser.id);
 
-localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
-localStorage.setItem('current_user',JSON.stringify(this.registeredUsers[userIndex]));
-this.currentUser=this.registeredUsers[userIndex];
-alert('Profil berhasil diperbarui!');
-this.page='dashboard';
+    if(error){
+      throw error;
+    }
+  }
+
+  // Update localStorage (always update for offline mode)
+  const userIndex = this.registeredUsers.findIndex(u => u.id === this.currentUser.id);
+  if(userIndex !== -1){
+    this.registeredUsers[userIndex] = {
+      ...this.registeredUsers[userIndex],
+      name:this.newUserProfile.name,
+      username:this.newUserProfile.username,
+      password:this.newUserProfile.password,
+      specialization:this.newUserProfile.specialization || '',
+      profile_photo:this.newUserProfile.profilePhoto
+    };
+    
+    // Update current user
+    this.currentUser = this.registeredUsers[userIndex];
+    localStorage.setItem('upsrs_current_user', JSON.stringify(this.currentUser));
+    localStorage.setItem('upsrs_users_v3', JSON.stringify(this.registeredUsers));
+    
+    console.log('✅ Profile updated in localStorage');
+  }
+
+  // Refresh users list if admin
+  if(this.currentUser.role === 'admin'){
+    await this.fetchUsers();
+  }
+
+  alert('Profil berhasil diperbarui!');
+  this.page='profile';
+
+}catch(err){
+console.error('Update profile error:', err);
+alert('Gagal update profil: ' + err.message);
 }
+},
+
+base64ToBlob(base64) {
+  const parts = base64.split(',');
+  const mime = parts[0].match(/:(.*?);/)[1];
+  const bstr = atob(parts[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new Blob([u8arr], { type: mime });
 }
 }}
 </script>
 </head>
 
 <body x-data="appData()" x-init="initApp()" x-cloak class="antialiased">
-  <!-- UI Fallback - Anti Putih -->
-  <div x-show="!currentUser" class="p-6 text-center text-slate-500">
-    Loading dashboard...
-  </div>
-
-  <!-- Debug Info - Sementara -->
-  <div class="fixed bottom-2 right-2 bg-black text-white text-xs px-2 py-1 z-50">
-    <span x-text="currentUser ? currentUser.role : 'no user'"></span>
-  </div>
-  <!-- Loading State -->
-  <div x-show="!appLoaded" x-transition class="fixed inset-0 bg-slate-50 flex items-center justify-center z-50">
-    <div class="text-center">
-      <div class="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-      <p class="text-slate-600 font-medium">Memuat UPSRS GO...</p>
-      <p class="text-slate-400 text-sm mt-2">Mohon tunggu sebentar</p>
-      
-      <!-- Manual Skip Button -->
-      <button @click="appLoaded = true" class="mt-4 px-4 py-2 bg-slate-200 text-slate-600 rounded-lg hover:bg-slate-300 text-sm">
-        Lewati Loading
-      </button>
-    </div>
-  </div>
-
-  <!-- Error State -->
-  <div x-show="hasError" x-transition class="fixed inset-0 bg-slate-50 flex items-center justify-center z-50">
-    <div class="text-center max-w-md mx-4">
-      <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-        <span class="text-2xl">❌</span>
-      </div>
-      <h2 class="text-xl font-bold text-slate-800 mb-2">Terjadi Kesalahan</h2>
-      <p class="text-slate-600 mb-4" x-text="errorMessage"></p>
-      <button @click="location.reload()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-        Refresh Halaman
-      </button>
-    </div>
-  </div>
 
 <!-- LOGIN -->
 <div x-show="page==='login'" class="min-h-screen flex items-center justify-center bg-slate-50 p-4">
@@ -1599,7 +1261,7 @@ this.page='dashboard';
 </div>
 
 <!-- DASHBOARD -->
-<div x-show="page==='dashboard'" x-transition class="max-w-md mx-auto p-4 pb-24">
+<div x-show="page==='dashboard'" class="max-w-md mx-auto p-4 pb-24">
 <!-- Header -->
 <div class="flex justify-between items-center mb-6 bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
 <div class="flex items-center gap-3">
@@ -1609,39 +1271,25 @@ this.page='dashboard';
 </div>
 <div>
 <h2 class="font-black text-lg" x-text="currentUser?.name"></h2>
-<p class="text-xs text-slate-400" x-text="isAdmin?'Administrator':'Teknisi Lapangan'"></p>
+<p class="text-xs text-slate-400" x-text="isAdmin?'Administrator':'Teknisi'"></p>
 </div>
 </div>
 <div class="flex gap-2">
-<button @click="viewUserProfile(currentUser)" class="px-3 py-2 bg-blue-100 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-200">Profil</button>
-<button @click="syncNow()" :disabled="!navigator.onLine" class="px-3 py-2 rounded-xl text-xs font-bold bg-sky-100 text-sky-700 disabled:opacity-50 disabled:cursor-not-allowed">🔘 Sync Sekarang</button>
-<div x-show="isSyncing" class="mt-2">
-  <div class="w-full bg-slate-200 rounded-full h-2">
-    <div class="bg-sky-500 h-2 rounded-full transition-all" :style="`width: ${syncProgress}%`"></div>
-  </div>
-  <div class="text-xs text-slate-500 mt-1">
-    Sync: <span x-text="syncProgress"></span>%
-  </div>
-</div>
-<div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold" :class="isOnline ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'">
-<span x-text="isOnline ? '🟢 Online' : '🔴 Offline'"></span>
-</div>
+<button @click="viewMyProfile()" class="px-3 py-2 bg-blue-100 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-200">Profil</button>
 <template x-if="isAdmin">
 <button @click="page='admin'" class="px-3 py-2 bg-purple-100 text-purple-600 rounded-xl text-sm font-bold hover:bg-purple-200">Admin</button>
 </template>
 <button @click="logout" class="px-4 py-2 bg-red-100 text-red-600 rounded-xl text-sm font-bold hover:bg-red-200">Logout</button>
 </div>
+</div>
+
 <!-- Stats -->
 <div class="bg-white p-5 rounded-2xl mb-6 shadow-sm border border-slate-100">
 <div class="flex gap-2 mb-4 p-1 bg-slate-50 rounded-xl">
-<button @click="filterPeriod='all'" :class="filterPeriod==='all'?'bg-white shadow-sm text-blue-600':''" class="flex-1 py-2 rounded-lg text-xs font-bold">Semua</button>
-<button @click="filterPeriod='today'" :class="filterPeriod==='today'?'bg-white shadow-sm text-blue-600':''" class="flex-1 py-2 rounded-lg text-xs font-bold">Hari Ini</button>
-<button @click="filterPeriod='week'" :class="filterPeriod==='week'?'bg-white shadow-sm text-blue-600':''" class="flex-1 py-2 rounded-lg text-xs font-bold">Minggu Ini</button>
-<button @click="filterPeriod='month'" :class="filterPeriod==='month'?'bg-white shadow-sm text-blue-600':''" class="flex-1 py-2 rounded-lg text-xs font-bold">Bulan Ini</button>
-</div>
-<div class="text-xs text-slate-400 mt-2">
-🕒 Terakhir sync:
-<span x-text="lastSyncTime ? dayjs(lastSyncTime).format('DD/MM/YYYY HH:mm') : 'Belum pernah'"></span>
+<button @click="filterPeriod='all'" :class="filterPeriod==='all'?'bg-white shadow text-blue-600':'text-slate-400'" class="flex-1 py-2 rounded-lg text-xs font-bold">Semua</button>
+<button @click="filterPeriod='today'" :class="filterPeriod==='today'?'bg-white shadow text-blue-600':'text-slate-400'" class="flex-1 py-2 rounded-lg text-xs font-bold">Hari</button>
+<button @click="filterPeriod='week'" :class="filterPeriod==='week'?'bg-white shadow text-blue-600':'text-slate-400'" class="flex-1 py-2 rounded-lg text-xs font-bold">Minggu</button>
+<button @click="filterPeriod='month'" :class="filterPeriod==='month'?'bg-white shadow text-blue-600':'text-slate-400'" class="flex-1 py-2 rounded-lg text-xs font-bold">Bulan</button>
 </div>
 <div class="grid grid-cols-3 gap-4 text-center">
 <div>
@@ -1763,10 +1411,6 @@ this.page='dashboard';
 <div class="mt-2">
 <span :class="task.statusPekerjaan==='Selesai'?'bg-emerald-100 text-emerald-700':'bg-orange-100 text-orange-700'" class="px-2 py-1 rounded text-xs font-bold" x-text="task.statusPekerjaan"></span>
 </div>
-<div class="mt-1 text-xs font-bold">
-<span x-show="task.synced_at" class="text-blue-600">☁️ Tersinkron</span>
-<span x-show="!task.synced_at" class="text-orange-600">📱 Menunggu Sync</span>
-</div>
 </div>
 </div>
 <div class="mt-3 flex gap-2">
@@ -1834,7 +1478,7 @@ Share WhatsApp
 <template x-if="!viewingUser?.profile_photo"><div class="w-full h-full flex items-center justify-center text-slate-400 text-2xl">👤</div></template>
 </div>
 <h3 class="text-lg font-black text-slate-800" x-text="viewingUser?.name"></h3>
-<p class="text-sm text-slate-500" x-text="viewingUser?.role==='admin'?'Administrator':'Teknisi Lapangan'"></p>
+<p class="text-sm text-slate-500" x-text="viewingUser?.role==='admin'?'Administrator':'Teknisi'"></p>
 </div>
 
 <div class="space-y-4">
@@ -1847,6 +1491,10 @@ Share WhatsApp
 <p class="text-sm text-slate-800" x-text="viewingUser?.password"></p>
 </div>
 <div class="bg-slate-50 p-4 rounded-xl">
+<p class="text-xs font-bold text-slate-600 mb-1">Bidang/Bagian Teknisi</p>
+<p class="text-sm text-slate-800" x-text="viewingUser?.specialization || 'Tidak diset'"></p>
+</div>
+<div class="bg-slate-50 p-4 rounded-xl">
 <p class="text-xs font-bold text-slate-600 mb-1">User ID</p>
 <p class="text-sm text-slate-800" x-text="viewingUser?.id"></p>
 </div>
@@ -1854,7 +1502,7 @@ Share WhatsApp
 
 <template x-if="viewingUser?.id===currentUser?.id">
 <div class="mt-6">
-<button @click="newUserProfile={name:viewingUser.name,username:viewingUser.username,password:viewingUser.password,profile_photo:viewingUser.profile_photo};page='editProfile'" class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition">Edit Profil</button>
+<button @click="newUserProfile={name:viewingUser.name,username:viewingUser.username,password:viewingUser.password,specialization:viewingUser.specialization||'',profilePhoto:viewingUser.profile_photo};page='editProfile'" class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition">Edit Profil</button>
 </div>
 </template>
 </div>
@@ -1884,16 +1532,20 @@ Share WhatsApp
 <input x-model="newUserProfile.password" type="password" class="input-style" placeholder="Password">
 </div>
 <div>
+<label class="block text-xs font-bold text-slate-600 mb-2">Bidang/Bagian Teknisi (opsional)</label>
+<input x-model="newUserProfile.specialization" type="text" class="input-style" placeholder="Contoh: IT, Teknisi AC, Teknisi Listrik, dll">
+</div>
+<div>
 <label class="block text-xs font-bold text-slate-600 mb-2">Foto Profil</label>
 <label class="block w-full h-24 bg-slate-50 rounded-xl border-2 border-dashed border-slate-300 flex items-center justify-center cursor-pointer overflow-hidden">
-<template x-if="!newUserProfile.profile_photo">
+<template x-if="!newUserProfile.profilePhoto">
 <div class="text-center">
 <svg class="w-8 h-8 mx-auto text-slate-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
 <p class="text-xs text-slate-500">Klik untuk upload foto</p>
 </div>
 </template>
-<template x-if="newUserProfile.profile_photo">
-<img :src="newUserProfile.profile_photo" class="w-full h-full object-cover">
+<template x-if="newUserProfile.profilePhoto">
+<img :src="newUserProfile.profilePhoto" class="w-full h-full object-cover">
 </template>
 <input type="file" accept="image/*" class="hidden" @change="handleProfilePhotoUpload">
 </label>
@@ -1947,7 +1599,7 @@ Share WhatsApp
 </div>
 
 <!-- ADMIN DASHBOARD -->
-<div x-show="page==='adminDashboard'" x-transition class="min-h-screen bg-slate-50 p-4">
+<div x-show="page==='adminDashboard'" class="min-h-screen bg-slate-50 p-4">
 <div class="max-w-6xl mx-auto">
 <!-- Header -->
 <div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100 mb-6">
@@ -2032,15 +1684,15 @@ Share WhatsApp
 
 <div class="grid grid-cols-3 gap-3 text-center">
 <div class="bg-blue-50 p-3 rounded-xl">
-<p class="text-lg font-black text-blue-600" x-text="safeGetUserStats(user.id).totalTasks"></p>
+<p class="text-lg font-black text-blue-600" x-text="getUserStats(user.id).totalTasks"></p>
 <p class="text-xs text-blue-500">Total Pekerjaan</p>
 </div>
 <div class="bg-emerald-50 p-3 rounded-xl">
-<p class="text-lg font-black text-emerald-600" x-text="safeGetUserStats(user.id).completedTasks"></p>
+<p class="text-lg font-black text-emerald-600" x-text="getUserStats(user.id).completedTasks"></p>
 <p class="text-xs text-emerald-500">Selesai</p>
 </div>
 <div class="bg-orange-50 p-3 rounded-xl">
-<p class="text-lg font-black text-orange-600" x-text="safeGetUserStats(user.id).pendingTasks"></p>
+<p class="text-lg font-black text-orange-600" x-text="getUserStats(user.id).pendingTasks"></p>
 <p class="text-xs text-orange-500">Pending</p>
 </div>
 </div>
@@ -2079,15 +1731,15 @@ Share WhatsApp
 <!-- User Stats -->
 <div class="grid grid-cols-3 gap-4">
 <div class="bg-blue-50 p-4 rounded-xl text-center">
-<p class="text-2xl font-black text-blue-600" x-text="safeGetUserStats(viewingUser?.id).totalTasks"></p>
+<p class="text-2xl font-black text-blue-600" x-text="getUserStats(viewingUser?.id).totalTasks"></p>
 <p class="text-xs text-blue-500">Total Pekerjaan</p>
 </div>
 <div class="bg-emerald-50 p-4 rounded-xl text-center">
-<p class="text-2xl font-black text-emerald-600" x-text="safeGetUserStats(viewingUser?.id).completedTasks"></p>
+<p class="text-2xl font-black text-emerald-600" x-text="getUserStats(viewingUser?.id).completedTasks"></p>
 <p class="text-xs text-emerald-500">Selesai</p>
 </div>
 <div class="bg-orange-50 p-4 rounded-xl text-center">
-<p class="text-2xl font-black text-orange-600" x-text="safeGetUserStats(viewingUser?.id).pendingTasks"></p>
+<p class="text-2xl font-black text-orange-600" x-text="getUserStats(viewingUser?.id).pendingTasks"></p>
 <p class="text-xs text-orange-500">Pending</p>
 </div>
 </div>
@@ -2203,15 +1855,15 @@ Share WhatsApp
 <!-- User Stats -->
 <div class="grid grid-cols-3 gap-4 mb-6">
 <div class="bg-blue-50 p-4 rounded-xl text-center">
-<p class="text-2xl font-black text-blue-600" x-text="safeGetUserStats(viewingUser?.id).totalTasks"></p>
+<p class="text-2xl font-black text-blue-600" x-text="getUserStats(viewingUser?.id).totalTasks"></p>
 <p class="text-xs text-blue-500">Total Pekerjaan</p>
 </div>
 <div class="bg-emerald-50 p-4 rounded-xl text-center">
-<p class="text-2xl font-black text-emerald-600" x-text="safeGetUserStats(viewingUser?.id).completedTasks"></p>
+<p class="text-2xl font-black text-emerald-600" x-text="getUserStats(viewingUser?.id).completedTasks"></p>
 <p class="text-xs text-emerald-500">Selesai</p>
 </div>
 <div class="bg-orange-50 p-4 rounded-xl text-center">
-<p class="text-2xl font-black text-orange-600" x-text="safeGetUserStats(viewingUser?.id).pendingTasks"></p>
+<p class="text-2xl font-black text-orange-600" x-text="getUserStats(viewingUser?.id).pendingTasks"></p>
 <p class="text-xs text-orange-500">Pending</p>
 </div>
 </div>
