@@ -1004,7 +1004,8 @@ this.editingTask=null;
 getUserReports(userId){
 const user=this.registeredUsers.find(u=>u.id===userId);
 if(!user)return [];
-return this.savedTasks.filter(task=>task.teknisi===user.name).sort((a,b)=>{
+// BENAR: Gunakan user_id untuk filtering, bukan teknisi
+return this.savedTasks.filter(task=>task.user_id===user.id).sort((a,b)=>{
 const dateA=dayjs(a.tanggal,'DD/MM/YYYY');
 const dateB=dayjs(b.tanggal,'DD/MM/YYYY');
 return dateB.isAfter(dateA)?1:-1;
@@ -1038,12 +1039,20 @@ const newPassword=prompt('Password baru:',user.password);
 if(newUsername && newPassword){
 const userIndex=this.registeredUsers.findIndex(u=>u.id===userId);
 if(userIndex!==-1){
+const oldName = this.registeredUsers[userIndex].name;
+
 this.registeredUsers[userIndex]={
 ...this.registeredUsers[userIndex],
 username:newUsername,
 password:newPassword
 };
+
+// Update localStorage
 localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
+
+// Clear cache untuk refresh data
+this.clearCache();
+
 alert('Kredensial user berhasil diperbarui!');
 }
 }
@@ -1219,6 +1228,10 @@ return alert('Lengkapi semua data profil!');
 
 const userIndex=this.registeredUsers.findIndex(u=>u.id===this.viewingUser.id);
 if(userIndex!==-1){
+const oldName = this.registeredUsers[userIndex].name;
+const newName = this.editingUserProfile.newName;
+
+// Update user data
 this.registeredUsers[userIndex]={
 ...this.registeredUsers[userIndex],
 name:this.editingUserProfile.newName,
@@ -1227,13 +1240,28 @@ password:this.editingUserProfile.newPassword,
 specialization:this.editingUserProfile.newSpecialization
 };
 
+// Update nama teknisi di semua laporan user ini
+if(oldName !== newName) {
+  this.savedTasks.forEach(task => {
+    if(task.user_id === this.viewingUser.id) {
+      // Update teknisi field untuk backward compatibility
+      task.teknisi = newName;
+    }
+  });
+  console.log(`✅ Updated teknisi name from "${oldName}" to "${newName}" in ${this.savedTasks.filter(t => t.user_id === this.viewingUser.id).length} tasks`);
+}
+
 // Update localStorage
 localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
+localStorage.setItem('upsrs_tasks_v3',JSON.stringify(this.savedTasks));
 
 // Update viewingUser
 this.viewingUser=this.registeredUsers[userIndex];
 
-alert('Profil user berhasil diperbarui!');
+// Clear cache untuk refresh data
+this.clearCache();
+
+alert('Profil user berhasil diperbarui!' + (oldName !== newName ? '\n\n✅ Nama di semua laporan juga telah diperbarui!' : ''));
 }
 },
 
@@ -1241,11 +1269,34 @@ alert('Profil user berhasil diperbarui!');
 getUserAllTasks(userId){
 const user=this.registeredUsers.find(u=>u.id===userId);
 if(!user)return [];
-return this.savedTasks.filter(task=>task.teknisi===user.name).sort((a,b)=>{
+// BENAR: Gunakan user_id untuk filtering, bukan teknisi
+return this.savedTasks.filter(task=>task.user_id===user.id).sort((a,b)=>{
 const dateA=dayjs(a.tanggal,'DD/MM/YYYY');
 const dateB=dayjs(b.tanggal,'DD/MM/YYYY');
 return dateB.isAfter(dateA)?1:-1;
 });
+},
+
+// Delete individual task
+deleteTask(taskId){
+if(!confirm('Apakah Anda yakin ingin menghapus laporan ini? Tindakan ini tidak dapat dibatalkan!'))return;
+
+// Find and remove task
+const taskIndex = this.savedTasks.findIndex(t => t.id === taskId);
+if(taskIndex !== -1){
+  const deletedTask = this.savedTasks[taskIndex];
+  this.savedTasks.splice(taskIndex, 1);
+  
+  // Update localStorage
+  localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+  
+  // Clear cache to refresh data
+  this.clearCache();
+  
+  alert(`Laporan "${deletedTask.ruangan} - ${deletedTask.gedung}" berhasil dihapus!`);
+} else {
+  alert('Laporan tidak ditemukan!');
+}
 },
 
 deleteUser(userId){
@@ -1258,8 +1309,8 @@ if(!user)return;
 // Remove user from registered users
 this.registeredUsers=this.registeredUsers.filter(u=>u.id!==userId);
 
-// Remove all tasks associated with this user
-this.savedTasks=this.savedTasks.filter(task=>task.teknisi!==user.name);
+// Remove all tasks associated with this user - BENAR: Gunakan user_id
+this.savedTasks=this.savedTasks.filter(task=>task.user_id!==user.id);
 
 // Update localStorage
 localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
@@ -1983,6 +2034,7 @@ Share WhatsApp
 <template x-if="task.status_pekerjaan!=='Selesai'">
 <button @click="editPendingTask(task)" class="px-3 py-1 bg-emerald-100 text-emerald-600 rounded-lg text-xs font-bold hover:bg-emerald-200">Edit Selesai</button>
 </template>
+<button @click="deleteTask(task.id)" class="px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs font-bold hover:bg-red-200">Hapus</button>
 </div>
 </div>
 </div>
@@ -2131,6 +2183,7 @@ Share WhatsApp
 <template x-if="task.status_pekerjaan!=='Selesai'">
 <button @click="editPendingTask(task)" class="px-3 py-1 bg-emerald-100 text-emerald-600 rounded-lg text-xs font-bold hover:bg-emerald-200">Edit Selesai</button>
 </template>
+<button @click="deleteTask(task.id)" class="px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs font-bold hover:bg-red-200">Hapus</button>
 </div>
 </div>
 </div>
