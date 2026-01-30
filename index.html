@@ -611,6 +611,10 @@ async fetchTasks(){
 
   try {
     console.log('🔄 Fetching tasks from Supabase...');
+    
+    // First, try to create table if it doesn't exist
+    await this.ensureTasksTable();
+    
     const { data, error } = await window.supabaseClient
       .from('tasks')
       .select('*')
@@ -635,6 +639,55 @@ async fetchTasks(){
     const localTasks = JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
     this.savedTasks = localTasks;
     console.log('📊 Using localStorage fallback:', localTasks.length);
+  }
+},
+
+// Ensure tasks table exists in Supabase
+async ensureTasksTable(){
+  try {
+    console.log('🔧 Checking if tasks table exists...');
+    
+    // Try to select from tasks table
+    const { data, error } = await window.supabaseClient
+      .from('tasks')
+      .select('count')
+      .limit(1);
+    
+    if(error && error.code === 'PGRST116') {
+      // Table doesn't exist, create it
+      console.log('📝 Creating tasks table...');
+      
+      const createTableSQL = `
+        CREATE TABLE IF NOT EXISTS tasks (
+          id BIGINT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          tanggal TEXT NOT NULL,
+          waktu TEXT NOT NULL,
+          teknisi TEXT NOT NULL,
+          gedung TEXT NOT NULL,
+          ruangan TEXT NOT NULL,
+          pelapor TEXT,
+          masalah TEXT NOT NULL,
+          penyelesaian TEXT NOT NULL,
+          statusPekerjaan TEXT NOT NULL,
+          foto TEXT,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+      `;
+      
+      const { error: createError } = await window.supabaseClient.rpc('exec_sql', { sql: createTableSQL });
+      
+      if(createError) {
+        console.warn('⚠️ Could not create table automatically:', createError);
+        console.log('📋 Please create table manually in Supabase dashboard');
+      } else {
+        console.log('✅ Tasks table created successfully');
+      }
+    } else {
+      console.log('✅ Tasks table exists');
+    }
+  } catch(error) {
+    console.warn('⚠️ Could not check table existence:', error);
   }
 },
 
@@ -942,6 +995,78 @@ alert('Daftar user berhasil diperbarui!');
 async refreshTasks(){
 await this.fetchTasks();
 alert('Daftar laporan berhasil diperbarui!');
+},
+
+// Combined refresh function for tasks and connection test
+async refreshAllData(){
+console.log('🔄 Starting comprehensive data refresh...');
+try {
+  // Test connection first
+  if(window.supabaseClient && navigator.onLine) {
+    console.log('🌐 Testing Supabase connection...');
+    const { data, error } = await window.supabaseClient.from('users').select('count').limit(1);
+    if(error) {
+      console.warn('⚠️ Supabase connection failed, using offline mode');
+      alert('⚠️ Koneksi Supabase gagal. Menggunakan mode offline.');
+    } else {
+      console.log('✅ Supabase connection successful');
+    }
+  } else {
+    console.log('📊 Working in offline mode');
+  }
+  
+  // Refresh tasks data
+  await this.fetchTasks();
+  
+  // Clear cache to ensure fresh data
+  this._cachedAllTasks = null;
+  this._cacheTimestamp = null;
+  
+  console.log('✅ Data refresh completed');
+  alert('🔄 Data berhasil diperbarui!\n\n' + 
+        (navigator.onLine ? '✅ Mode Online' : '📊 Mode Offline') + 
+        '\n📝 Total Laporan: ' + this.savedTasks.length);
+        
+} catch(error) {
+  console.error('❌ Refresh error:', error);
+  alert('❌ Gagal refresh data: ' + error.message);
+}
+},
+
+// Force sync data from localStorage and clear cache
+forceSyncData(){
+console.log('🔄 Force syncing data...');
+try {
+  // Force reload from localStorage
+  this.savedTasks = JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
+  this.registeredUsers = JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
+  
+  // Clear all caches
+  this._cachedAllTasks = null;
+  this._cacheTimestamp = null;
+  
+  console.log('✅ Force sync completed');
+  console.log('📝 Tasks loaded:', this.savedTasks.length);
+  console.log('👤 Users loaded:', this.registeredUsers.length);
+  
+  // Show task details for debugging
+  if(this.savedTasks.length > 0) {
+    console.log('📋 Task samples:', this.savedTasks.slice(0, 3).map(t => ({
+      id: t.id,
+      teknisi: t.teknisi,
+      tanggal: t.tanggal,
+      masalah: t.masalah?.substring(0, 50) + '...'
+    })));
+  }
+  
+  alert('🔄 Data berhasil disinkronkan dari localStorage!\n\n' +
+        '📝 Total Laporan: ' + this.savedTasks.length + '\n' +
+        '👤 Total User: ' + this.registeredUsers.length);
+        
+} catch(error) {
+  console.error('❌ Force sync error:', error);
+  alert('❌ Gagal sinkronisasi data: ' + error.message);
+}
 },
 
 // Debug function to check data consistency
@@ -1668,9 +1793,9 @@ Share WhatsApp
 <div class="flex items-center justify-between mb-4">
 <h3 class="text-lg font-black text-slate-800">Kelola User Terdaftar</h3>
 <div class="flex gap-2 flex-wrap">
-<button @click="refreshTasks" class="px-4 py-2 bg-green-100 text-green-600 rounded-xl text-sm font-bold hover:bg-green-200">🔄 Refresh Laporan</button>
+<button @click="refreshAllData" class="px-4 py-2 bg-green-100 text-green-600 rounded-xl text-sm font-bold hover:bg-green-200">🔄 Refresh Data</button>
+<button @click="forceSyncData" class="px-4 py-2 bg-orange-100 text-orange-600 rounded-xl text-sm font-bold hover:bg-orange-200">🔄 Force Sync</button>
 <button @click="refreshUserList" class="px-4 py-2 bg-blue-100 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-200">🔄 Refresh User</button>
-<button @click="testConnection" class="px-4 py-2 bg-orange-100 text-orange-600 rounded-xl text-sm font-bold hover:bg-orange-200">🌐 Test Koneksi</button>
 </div>
 </div>
 <div class="space-y-4">
