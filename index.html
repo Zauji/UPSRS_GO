@@ -35,8 +35,8 @@ dayjs.locale('id');
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
   // Ganti dengan URL dan Anon Key dari Project Settings > API di Supabase Anda
-  const SUPABASE_URL = 'https://ibfyykoxordttxrfxljl.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImliZnl5a294b3JkdHR4cmZ4bGpsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2NjU0NjgsImV4cCI6MjA4NTI0MTQ2OH0.bXUGB3v4tMBE5fV0ORd317NB1HW4onCSzk7tOOMqceM';
+  const SUPABASE_URL = 'https://zxlegpyzieciwykzjhon.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4bGVncHl6aWVjaXd5a3pqaG9uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2NjY4MzAsImV4cCI6MjA4NTI0MjgzMH0.bA_2LtumthKROSnEzIZEbFPYiQ6tT7vqeWOo7IO0haQ';
   
   try {
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -459,11 +459,17 @@ async simpanTugas() {
     // Try to save to Supabase first (WAJIB untuk user)
     if (window.supabaseClient) {
       try {
-        const { error } = await window.supabaseClient
+        console.log('🔄 Attempting to save to Supabase...');
+        console.log('📝 Entry data:', entry);
+        
+        const { data, error } = await window.supabaseClient
           .from('tasks')
           .insert([entry]);
 
+        console.log('📊 Supabase response:', { data, error });
+
         if (error) {
+          console.error('❌ Supabase error details:', error);
           throw error;
         }
 
@@ -473,13 +479,59 @@ async simpanTugas() {
         // Fetch updated tasks from Supabase
         await this.fetchTasks();
       } catch (supabaseError) {
-        console.warn('Supabase save failed:', supabaseError);
-        alert('❌ Gagal menyimpan ke server. Pastikan koneksi internet stabil.');
-        return; // Jangan simpan ke localStorage jika Supabase gagal
+        console.error('❌ Supabase save failed:', supabaseError);
+        console.log('🔍 Error details:', {
+          message: supabaseError.message,
+          details: supabaseError.details,
+          hint: supabaseError.hint,
+          code: supabaseError.code
+        });
+        
+        // Tambah opsi fallback ke localStorage
+        const useOffline = confirm('❌ Gagal menyimpan ke server.\n\n' +
+          'Error: ' + supabaseError.message + '\n\n' +
+          'Apakah ingin menyimpan secara offline (hanya di HP ini)?\n\n' +
+          '✅ Ya = Simpan di HP saja\n' +
+          '❌ Tidak = Coba lagi nanti');
+          
+        if(useOffline) {
+          // Fallback ke localStorage dengan field lama
+          const offlineEntry = {
+            ...entry,
+            teknisi: this.currentUser.name, // Tambah teknisi untuk compatibility
+            statusPekerjaan: this.newTask.statusPekerjaan // Gunakan field lama
+          };
+          
+          this.savedTasks.push(offlineEntry);
+          localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+          console.log('✅ Task saved to localStorage:', offlineEntry);
+          alert('✅ Laporan berhasil disimpan (Mode Offline - Hanya di HP ini)');
+        } else {
+          alert('❌ Laporan tidak disimpan. Silakan coba lagi saat koneksi stabil.');
+          return;
+        }
       }
     } else {
-      alert('❌ Tidak ada koneksi ke server. Pastikan online untuk menyimpan laporan.');
-      return;
+      const useOffline = confirm('❌ Tidak ada koneksi ke server.\n\n' +
+        'Apakah ingin menyimpan secara offline (hanya di HP ini)?\n\n' +
+        '✅ Ya = Simpan di HP saja\n' +
+        '❌ Tidak = Batalkan');
+        
+      if(useOffline) {
+        const offlineEntry = {
+          ...entry,
+          teknisi: this.currentUser.name,
+          statusPekerjaan: this.newTask.statusPekerjaan
+        };
+        
+        this.savedTasks.push(offlineEntry);
+        localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+        console.log('✅ Task saved to localStorage:', offlineEntry);
+        alert('✅ Laporan berhasil disimpan (Mode Offline - Hanya di HP ini)');
+      } else {
+        alert('❌ Laporan dibatalkan.');
+        return;
+      }
     }
 
     /* ================= RESET FORM ================= */
