@@ -450,6 +450,7 @@ async simpanTugas() {
     const entry = {
       id: Date.now(),
       user_id: this.currentUser.id, // KUNCI UTAMA - WAJIB
+      nama: this.currentUser.name, // TAMBAHAN: Nama user
       tanggal: dayjs().format('DD/MM/YYYY'),
       waktu: dayjs().format('HH:mm'),
       gedung: this.newTask.gedung,
@@ -482,8 +483,12 @@ async simpanTugas() {
         console.log('✅ Task saved to Supabase:', entry);
         alert('✅ Laporan berhasil disimpan (Online)');
         
-        // Fetch updated tasks from Supabase
-        await this.fetchTasks();
+        // OPTIMASI: Add task to local cache immediately instead of re-fetching
+        this.savedTasks.unshift(entry);
+        this.clearCache();
+        
+        // Optional: Background refresh untuk data terbaru
+        setTimeout(() => this.fetchTasks(), 2000);
       } catch (supabaseError) {
         console.error('❌ Supabase save failed:', supabaseError);
         console.log('🔍 Error details:', {
@@ -656,44 +661,59 @@ async fetchTasks(){
   // Skip if Supabase is not available - ADMIN HARUS ONLINE
   if (!window.supabaseClient) {
     console.error('❌ Supabase client not available. Admin must be online to fetch tasks.');
-    this.savedTasks = [];
     return;
   }
 
   try {
-    console.log('🔄 Fetching tasks from Supabase...');
+    console.log('🚀 Fast fetching tasks from Supabase...');
+    const startTime = performance.now();
     
-    // First, try to create table if it doesn't exist
-    await this.ensureTasksTable();
-    
-    const { data, error } = await window.supabaseClient
+    // CARA CEPAT: Fetch tasks tanpa JOIN, lalu map nama user
+    const { data: tasks, error: tasksError } = await window.supabaseClient
       .from('tasks')
       .select('*')
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(1000); // Batasi untuk performa
 
-    if(error) {
-      console.error('❌ Failed to fetch tasks from Supabase:', error);
+    if(tasksError) {
+      console.error('❌ Error fetching tasks:', tasksError);
       this.savedTasks = [];
       return;
     }
 
-    if(data && data.length > 0) {
-      this.savedTasks = data;
-      console.log('✅ Tasks fetched from Supabase:', data.length);
-      console.log('📝 Task samples:', data.slice(0, 3).map(t => ({
-        id: t.id, 
-        user_id: t.user_id, 
-        status_pekerjaan: t.status_pekerjaan,
-        tanggal: t.tanggal
-      })));
-    } else {
+    if(!tasks || tasks.length === 0) {
       this.savedTasks = [];
       console.log('📝 No tasks found in Supabase');
+      this.clearCache();
+      return;
     }
+
+    // Map nama user dari registeredUsers (lebih cepat dari JOIN)
+    const formattedData = tasks.map(task => {
+      const user = this.registeredUsers.find(u => u.id === task.user_id);
+      return {
+        ...task,
+        nama: user ? user.name : 'Unknown User',
+        username: user ? user.username : 'unknown'
+      };
+    });
+
+    this.savedTasks = formattedData;
+    localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
     
+    const endTime = performance.now();
+    console.log(`✅ Tasks fetched in ${(endTime - startTime).toFixed(2)}ms:`, formattedData.length);
+    console.log('📝 Task samples:', formattedData.slice(0, 3).map(t => ({
+      id: t.id,
+      user_id: t.user_id,
+      nama: t.nama,
+      status_pekerjaan: t.status_pekerjaan,
+      tanggal: t.tanggal
+    })));
+
     // Clear cache saat data berubah
     this.clearCache();
-    
+
   } catch (error) {
     console.error('❌ Critical error fetching tasks:', error);
     this.savedTasks = [];
@@ -762,43 +782,27 @@ get regularUsers(){
 
 getAllUserTasks(){
 try{
-console.log('🔍 Getting all user tasks...');
-console.log('📊 Registered users:', this.registeredUsers.length);
-console.log('📝 Saved tasks:', this.savedTasks.length);
-
-// Return cached result if available and data hasn't changed
-if(this._cachedAllTasks && this._cacheTimestamp && (Date.now() - this._cacheTimestamp < 10000)){
-  console.log('📋 Using cached all tasks result');
+// Return cached result if available and fresh
+if(this._cachedAllTasks && this._cacheTimestamp && (Date.now() - this._cacheTimestamp < 30000)){
   return this._cachedAllTasks;
 }
 
 const allTasks=[];
 this.regularUsers.forEach(user=>{
-console.log(`👤 Processing user: ${user.name} (${user.id})`);
-// BENAR: Gunakan user_id untuk filtering
-const userTasks=this.savedTasks.filter(task=>task.user_id===user.id);
-console.log(`📝 Tasks for ${user.name}:`, userTasks.length);
-if(userTasks.length > 0) {
-  console.log('🔍 Task details:', userTasks.map(t => ({
-    id: t.id, 
-    user_id: t.user_id, 
-    status_pekerjaan: t.status_pekerjaan,
-    tanggal: t.tanggal
-  })));
-}
-userTasks.forEach(task=>{
-allTasks.push({...task,userProfile:user.profile_photo,userRole:user.role});
+  // BENAR: Gunakan user_id untuk filtering
+  const userTasks=this.savedTasks.filter(task=>task.user_id===user.id);
+  userTasks.forEach(task=>{
+    allTasks.push({...task,userProfile:user.profile_photo,userRole:user.role});
+  });
 });
-});
-console.log('✅ Total all tasks before sorting:', allTasks.length);
-const sorted = allTasks.sort((a,b)=>{
-const dateA=dayjs(a.tanggal,'DD/MM/YYYY');
-const dateB=dayjs(b.tanggal,'DD/MM/YYYY');
-return dateB.isAfter(dateA)?1:-1;
-});
-console.log('✅ Sorted all tasks:', sorted.length);
 
-// Cache the result dengan timestamp yang lebih lama
+const sorted = allTasks.sort((a,b)=>{
+  const dateA=dayjs(a.tanggal,'DD/MM/YYYY');
+  const dateB=dayjs(b.tanggal,'DD/MM/YYYY');
+  return dateB.isAfter(dateA)?1:-1;
+});
+
+// Cache dengan timestamp lebih lama (30 detik)
 this._cachedAllTasks = sorted;
 this._cacheTimestamp = Date.now();
 
@@ -1249,46 +1253,36 @@ alert('Daftar laporan berhasil diperbarui!');
 },
 // Combined refresh function for real server refresh only
 async refreshAllData(){
-console.log('🔄 Starting real server refresh...');
+console.log('🚀 Starting fast server refresh...');
+const startTime = performance.now();
 try {
   // Clear cache first
   this.clearCache();
   
   // Test connection first
-  let connectionStatus = '❌ Tidak Ada Koneksi';
-  if(window.supabaseClient && navigator.onLine) {
-    console.log('🌐 Testing Supabase connection...');
-    const { data, error } = await window.supabaseClient.from('users').select('count').limit(1);
-    if(error) {
-      console.warn('⚠️ Supabase connection failed:', error);
-      connectionStatus = '⚠️ Koneksi Gagal';
-      alert('❌ Gagal terhubung ke server. Pastikan koneksi internet stabil.');
-      return;
-    } else {
-      console.log('✅ Supabase connection successful');
-      connectionStatus = '✅ Mode Online';
-    }
-  } else {
+  if(!window.supabaseClient || !navigator.onLine) {
     alert('❌ Tidak ada koneksi internet. Admin harus online untuk refresh data.');
     return;
   }
   
-  // Refresh users data from server
-  console.log('👤 Refreshing users from server...');
-  await this.fetchUsers();
+  // PARALLEL FETCHING - lebih cepat
+  console.log('⚡ Parallel fetching users and tasks...');
+  const [usersResult, tasksResult] = await Promise.allSettled([
+    this.fetchUsers(),
+    this.fetchTasks()
+  ]);
   
-  // Refresh tasks data from server
-  console.log('📝 Refreshing tasks from server...');
-  await this.fetchTasks();
+  const endTime = performance.now();
+  console.log(`✅ Fast refresh completed in ${(endTime - startTime).toFixed(2)}ms`);
   
-  console.log('✅ Server refresh completed');
-  console.log('📝 Tasks loaded from server:', this.savedTasks.length);
-  console.log('👤 Users loaded from server:', this.registeredUsers.length);
+  // Check results
+  let message = '🔄 Data berhasil diperbarui dari server!\n\n';
+  message += '✅ Mode Online\n';
+  message += `📝 Total Laporan: ${this.savedTasks.length}\n`;
+  message += `👤 Total User: ${this.registeredUsers.length}\n`;
+  message += `⚡ Waktu: ${(endTime - startTime).toFixed(2)}ms`;
   
-  alert('🔄 Data berhasil diperbarui dari server!\n\n' + 
-        connectionStatus + '\n' +
-        '📝 Total Laporan: ' + this.savedTasks.length + '\n' +
-        '👤 Total User: ' + this.registeredUsers.length);
+  alert(message);
         
 } catch(error) {
   console.error('❌ Server refresh error:', error);
