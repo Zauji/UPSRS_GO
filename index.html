@@ -75,6 +75,12 @@ viewingUser:null,
 isExporting:false,
 editingUser:null,
 
+// Detail statistics modal controls
+showDailyDetail:false,
+showWeeklyDetail:false,
+showMonthlyDetail:false,
+showWeeklyByWeekDetail:false,
+
 authName:'',
 authUsername:'',
 authPassword:'',
@@ -854,6 +860,142 @@ monthlyTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month'
 thisWeekCompleted:allTasks.filter(t=>t.status_pekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
 thisMonthCompleted:allTasks.filter(t=>t.status_pekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length
 };
+},
+
+// Get detailed daily stats per user
+getDailyStatsPerUser(){
+try{
+const allTasks=this.getAllUserTasks();
+const now=dayjs();
+const today=now.format('DD/MM/YYYY');
+const userStats={};
+
+this.regularUsers.forEach(user=>{
+const userTasks=allTasks.filter(task=>task.user_id===user.id && task.tanggal===today);
+userStats[user.id]={
+userName:user.name,
+totalTasks:userTasks.length,
+completedTasks:userTasks.filter(t=>t.status_pekerjaan==='Selesai').length,
+pendingTasks:userTasks.filter(t=>t.status_pekerjaan!=='Selesai').length,
+tasks:userTasks
+};
+});
+
+return userStats;
+}catch(error){
+console.error('Error in getDailyStatsPerUser:', error);
+return{};
+}
+},
+
+// Get detailed weekly stats per user
+getWeeklyStatsPerUser(){
+try{
+const allTasks=this.getAllUserTasks();
+const now=dayjs();
+const userStats={};
+
+this.regularUsers.forEach(user=>{
+const userTasks=allTasks.filter(task=>task.user_id===user.id && dayjs(task.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day')));
+userStats[user.id]={
+userName:user.name,
+totalTasks:userTasks.length,
+completedTasks:userTasks.filter(t=>t.status_pekerjaan==='Selesai').length,
+pendingTasks:userTasks.filter(t=>t.status_pekerjaan!=='Selesai').length,
+tasks:userTasks
+};
+});
+
+return userStats;
+}catch(error){
+console.error('Error in getWeeklyStatsPerUser:', error);
+return{};
+}
+},
+
+// Get detailed monthly stats per user
+getMonthlyStatsPerUser(){
+try{
+const allTasks=this.getAllUserTasks();
+const now=dayjs();
+const userStats={};
+
+this.regularUsers.forEach(user=>{
+const userTasks=allTasks.filter(task=>task.user_id===user.id && dayjs(task.tanggal,'DD/MM/YYYY').isSame(now,'month'));
+userStats[user.id]={
+userName:user.name,
+totalTasks:userTasks.length,
+completedTasks:userTasks.filter(t=>t.status_pekerjaan==='Selesai').length,
+pendingTasks:userTasks.filter(t=>t.status_pekerjaan!=='Selesai').length,
+tasks:userTasks
+};
+});
+
+return userStats;
+}catch(error){
+console.error('Error in getMonthlyStatsPerUser:', error);
+return{};
+}
+},
+
+// Get weekly stats by week number (1-4)
+getWeeklyStatsByWeek(){
+try{
+const allTasks=this.getAllUserTasks();
+const now=dayjs();
+const currentMonth=now.month();
+const currentYear=now.year();
+const weekStats={};
+
+// Initialize weeks 1-4
+for(let i=1;i<=4;i++){
+weekStats[i]={
+weekNumber:i,
+userStats:{},
+totalTasks:0,
+totalCompleted:0
+};
+}
+
+this.regularUsers.forEach(user=>{
+// Initialize user stats for each week
+for(let i=1;i<=4;i++){
+weekStats[i].userStats[user.id]={
+userName:user.name,
+totalTasks:0,
+completedTasks:0,
+pendingTasks:0
+};
+}
+});
+
+allTasks.forEach(task=>{
+const taskDate=dayjs(task.tanggal,'DD/MM/YYYY');
+if(taskDate.month()===currentMonth && taskDate.year()===currentYear){
+// Calculate week number (1-4)
+const firstDayOfMonth=taskDate.startOf('month');
+const dayOfMonth=taskDate.date();
+const weekNumber=Math.ceil((dayOfMonth + firstDayOfMonth.day())/7);
+const adjustedWeekNumber=Math.min(weekNumber,4); // Cap at 4
+
+if(weekStats[adjustedWeekNumber] && weekStats[adjustedWeekNumber].userStats[task.user_id]){
+weekStats[adjustedWeekNumber].userStats[task.user_id].totalTasks++;
+weekStats[adjustedWeekNumber].totalTasks++;
+if(task.status_pekerjaan==='Selesai'){
+weekStats[adjustedWeekNumber].userStats[task.user_id].completedTasks++;
+weekStats[adjustedWeekNumber].totalCompleted++;
+}else{
+weekStats[adjustedWeekNumber].userStats[task.user_id].pendingTasks++;
+}
+}
+}
+});
+
+return weekStats;
+}catch(error){
+console.error('Error in getWeeklyStatsByWeek:', error);
+return{};
+}
 },
 
 // Force refresh admin stats
@@ -1973,24 +2115,24 @@ Share WhatsApp
 <div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100 mb-6">
 <h3 class="text-lg font-black text-slate-800 mb-4">Data Statistik</h3>
 <div class="grid grid-cols-3 gap-4">
-<div class="text-center">
+<div class="text-center cursor-pointer hover:scale-105 transition-transform" @click="showDailyDetail=true">
 <h4 class="text-sm font-bold text-purple-600 mb-2">Harian</h4>
-<div class="bg-purple-50 p-4 rounded-xl">
+<div class="bg-purple-50 p-4 rounded-xl hover:bg-purple-100 transition">
 <p class="text-xl font-black text-purple-800" x-text="adminStats.todayTasks"></p>
 <p class="text-xs text-purple-500">Hari Ini</p>
 </div>
 </div>
-<div class="text-center">
+<div class="text-center cursor-pointer hover:scale-105 transition-transform" @click="showWeeklyByWeekDetail=true">
 <h4 class="text-sm font-bold text-blue-600 mb-2">Mingguan</h4>
-<div class="bg-blue-50 p-4 rounded-xl">
+<div class="bg-blue-50 p-4 rounded-xl hover:bg-blue-100 transition">
 <p class="text-xl font-black text-blue-800" x-text="adminStats.weeklyTasks"></p>
 <p class="text-xs text-blue-500">7 Hari Terakhir</p>
 <p class="text-xs text-blue-400 mt-1">Selesai: <span x-text="adminStats.thisWeekCompleted"></span></p>
 </div>
 </div>
-<div class="text-center">
+<div class="text-center cursor-pointer hover:scale-105 transition-transform" @click="showMonthlyDetail=true">
 <h4 class="text-sm font-bold text-emerald-600 mb-2">Bulanan</h4>
-<div class="bg-emerald-50 p-4 rounded-xl">
+<div class="bg-emerald-50 p-4 rounded-xl hover:bg-emerald-100 transition">
 <p class="text-xl font-black text-emerald-800" x-text="adminStats.monthlyTasks"></p>
 <p class="text-xs text-emerald-500">Bulan Ini</p>
 <p class="text-xs text-emerald-400 mt-1">Selesai: <span x-text="adminStats.thisMonthCompleted"></span></p>
@@ -2281,6 +2423,125 @@ Share WhatsApp
 <p class="text-sm text-slate-400">User ini belum memiliki laporan</p>
 </div>
 </div>
+</div>
+</div>
+</div>
+</div>
+
+<!-- DAILY DETAIL MODAL -->
+<div x-show="showDailyDetail" x-cloak class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+<div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
+<div class="p-6 border-b border-slate-200">
+<div class="flex items-center justify-between">
+<h3 class="text-xl font-black text-slate-800">📊 Detail Statistik Harian</h3>
+<button @click="showDailyDetail=false" class="text-slate-400 hover:text-slate-600">
+<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+</button>
+</div>
+<p class="text-sm text-slate-500 mt-1">Total tugas per user hari ini (<span x-text="new Date().toLocaleDateString('id-ID')"></span>)</p>
+</div>
+<div class="p-6 overflow-y-auto max-h-[60vh]">
+<template x-for="userId in Object.keys(getDailyStatsPerUser())" :key="userId">
+<div class="bg-purple-50 p-4 rounded-xl mb-3">
+<div class="flex items-center justify-between">
+<div>
+<h4 class="font-bold text-purple-800" x-text="getDailyStatsPerUser()[userId].userName"></h4>
+<p class="text-sm text-purple-600">Total: <span x-text="getDailyStatsPerUser()[userId].totalTasks"></span> tugas</p>
+</div>
+<div class="text-right">
+<p class="text-sm text-emerald-600 font-bold">✅ <span x-text="getDailyStatsPerUser()[userId].completedTasks"></span></p>
+<p class="text-sm text-orange-600 font-bold">⏳ <span x-text="getDailyStatsPerUser()[userId].pendingTasks"></span></p>
+</div>
+</div>
+</div>
+</template>
+<div x-show="Object.keys(getDailyStatsPerUser()).length===0" class="text-center py-10">
+<p class="text-sm text-slate-400">Tidak ada tugas hari ini</p>
+</div>
+</div>
+</div>
+</div>
+
+<!-- WEEKLY BY WEEK DETAIL MODAL -->
+<div x-show="showWeeklyByWeekDetail" x-cloak class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+<div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
+<div class="p-6 border-b border-slate-200">
+<div class="flex items-center justify-between">
+<h3 class="text-xl font-black text-slate-800">📊 Detail Statistik Mingguan</h3>
+<button @click="showWeeklyByWeekDetail=false" class="text-slate-400 hover:text-slate-600">
+<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+</button>
+</div>
+<p class="text-sm text-slate-500 mt-1">Total tugas per user per minggu (bulan <span x-text="new Date().toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })"></span>)</p>
+</div>
+<div class="p-6 overflow-y-auto max-h-[60vh]">
+<template x-for="weekNum in Object.keys(getWeeklyStatsByWeek())" :key="weekNum">
+<div class="mb-6">
+<h4 class="font-bold text-blue-800 mb-3">📅 Minggu <span x-text="weekNum"></span></h4>
+<div class="bg-blue-50 p-4 rounded-xl">
+<div class="grid grid-cols-2 gap-4 mb-3">
+<div class="text-center">
+<p class="text-sm text-blue-600">Total Tugas</p>
+<p class="text-xl font-black text-blue-800" x-text="getWeeklyStatsByWeek()[weekNum].totalTasks"></p>
+</div>
+<div class="text-center">
+<p class="text-sm text-emerald-600">Selesai</p>
+<p class="text-xl font-black text-emerald-800" x-text="getWeeklyStatsByWeek()[weekNum].totalCompleted"></p>
+</div>
+</div>
+<div class="space-y-2">
+<template x-for="userId in Object.keys(getWeeklyStatsByWeek()[weekNum].userStats)" :key="userId">
+<div class="bg-white p-3 rounded-lg">
+<div class="flex items-center justify-between">
+<h5 class="font-bold text-blue-700" x-text="getWeeklyStatsByWeek()[weekNum].userStats[userId].userName"></h5>
+<div class="flex gap-3">
+<span class="text-sm">📝 <span x-text="getWeeklyStatsByWeek()[weekNum].userStats[userId].totalTasks"></span></span>
+<span class="text-sm text-emerald-600">✅ <span x-text="getWeeklyStatsByWeek()[weekNum].userStats[userId].completedTasks"></span></span>
+<span class="text-sm text-orange-600">⏳ <span x-text="getWeeklyStatsByWeek()[weekNum].userStats[userId].pendingTasks"></span></span>
+</div>
+</div>
+</div>
+</template>
+</div>
+</div>
+</div>
+</template>
+<div x-show="Object.keys(getWeeklyStatsByWeek()).length===0" class="text-center py-10">
+<p class="text-sm text-slate-400">Tidak ada tugas mingguan</p>
+</div>
+</div>
+</div>
+</div>
+
+<!-- MONTHLY DETAIL MODAL -->
+<div x-show="showMonthlyDetail" x-cloak class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+<div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
+<div class="p-6 border-b border-slate-200">
+<div class="flex items-center justify-between">
+<h3 class="text-xl font-black text-slate-800">📊 Detail Statistik Bulanan</h3>
+<button @click="showMonthlyDetail=false" class="text-slate-400 hover:text-slate-600">
+<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+</button>
+</div>
+<p class="text-sm text-slate-500 mt-1">Total tugas per user bulan ini (<span x-text="new Date().toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })"></span>)</p>
+</div>
+<div class="p-6 overflow-y-auto max-h-[60vh]">
+<template x-for="userId in Object.keys(getMonthlyStatsPerUser())" :key="userId">
+<div class="bg-emerald-50 p-4 rounded-xl mb-3">
+<div class="flex items-center justify-between">
+<div>
+<h4 class="font-bold text-emerald-800" x-text="getMonthlyStatsPerUser()[userId].userName"></h4>
+<p class="text-sm text-emerald-600">Total: <span x-text="getMonthlyStatsPerUser()[userId].totalTasks"></span> tugas</p>
+</div>
+<div class="text-right">
+<p class="text-sm text-emerald-600 font-bold">✅ <span x-text="getMonthlyStatsPerUser()[userId].completedTasks"></span></p>
+<p class="text-sm text-orange-600 font-bold">⏳ <span x-text="getMonthlyStatsPerUser()[userId].pendingTasks"></span></p>
+</div>
+</div>
+</div>
+</template>
+<div x-show="Object.keys(getMonthlyStatsPerUser()).length===0" class="text-center py-10">
+<p class="text-sm text-slate-400">Tidak ada tugas bulan ini</p>
 </div>
 </div>
 </div>
