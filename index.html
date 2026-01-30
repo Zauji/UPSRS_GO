@@ -610,6 +610,7 @@ async fetchTasks(){
   }
 
   try {
+    console.log('🔄 Fetching tasks from Supabase...');
     const { data, error } = await window.supabaseClient
       .from('tasks')
       .select('*')
@@ -622,9 +623,18 @@ async fetchTasks(){
       console.log('📝 Task samples:', data.slice(0, 3).map(t => ({id: t.id, teknisi: t.teknisi, user_id: t.user_id})));
     } else if(error) {
       console.error('❌ Supabase fetch error:', error);
+      console.log('📊 Falling back to localStorage due to Supabase error');
+      // Ensure we have localStorage data as fallback
+      const localTasks = JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
+      this.savedTasks = localTasks;
+      console.log('📊 Using localStorage fallback:', localTasks.length);
     }
   } catch (error) {
     console.warn('⚠️ Failed to fetch tasks from Supabase, using localStorage:', error);
+    // Ensure we have localStorage data as fallback
+    const localTasks = JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
+    this.savedTasks = localTasks;
+    console.log('📊 Using localStorage fallback:', localTasks.length);
   }
 },
 
@@ -637,13 +647,22 @@ try{
 console.log('🔍 Getting all user tasks...');
 console.log('📊 Registered users:', this.registeredUsers.length);
 console.log('📝 Saved tasks:', this.savedTasks.length);
+
+// Return cached result if available and data hasn't changed
+if(this._cachedAllTasks && this._cacheTimestamp && (Date.now() - this._cacheTimestamp < 5000)){
+  console.log('📋 Using cached all tasks result');
+  return this._cachedAllTasks;
+}
+
 const allTasks=[];
 this.regularUsers.forEach(user=>{
 console.log(`👤 Processing user: ${user.name} (${user.id})`);
 // Fix: Use teknisi field for consistency with data storage
 const userTasks=this.savedTasks.filter(task=>task.teknisi===user.name);
 console.log(`📝 Tasks for ${user.name}:`, userTasks.length);
-console.log('🔍 Task details:', userTasks.map(t => ({id: t.id, teknisi: t.teknisi, user_id: t.user_id})));
+if(userTasks.length > 0) {
+  console.log('🔍 Task details:', userTasks.map(t => ({id: t.id, teknisi: t.teknisi, user_id: t.user_id})));
+}
 userTasks.forEach(task=>{
 allTasks.push({...task,userProfile:user.profile_photo,userRole:user.role});
 });
@@ -655,6 +674,11 @@ const dateB=dayjs(b.tanggal,'DD/MM/YYYY');
 return dateB.isAfter(dateA)?1:-1;
 });
 console.log('✅ Sorted all tasks:', sorted.length);
+
+// Cache the result
+this._cachedAllTasks = sorted;
+this._cacheTimestamp = Date.now();
+
 return sorted;
 }catch(error){
 console.error('❌ Error in getAllUserTasks:', error);
@@ -930,7 +954,35 @@ console.log('Saved Tasks:', this.savedTasks.length);
 console.log('All User Tasks:', this.getAllUserTasks().length);
 console.log('Task Sample:', this.savedTasks.slice(0, 2));
 console.log('User Sample:', this.regularUsers.slice(0, 2));
+console.log('Supabase Available:', !!window.supabaseClient);
+console.log('Online Mode:', navigator.onLine);
 alert('Debug data logged to console. Check F12 > Console.');
+},
+
+// Test connection and sync status
+testConnection(){
+console.log('=== CONNECTION TEST ===');
+console.log('Navigator Online:', navigator.onLine);
+console.log('Supabase Client:', !!window.supabaseClient);
+
+if(window.supabaseClient && navigator.onLine) {
+  console.log('Testing Supabase connection...');
+  window.supabaseClient
+    .from('users')
+    .select('count')
+    .then(({ data, error }) => {
+      if(error) {
+        console.error('❌ Supabase connection failed:', error);
+        alert('❌ Supabase connection failed. Using offline mode.');
+      } else {
+        console.log('✅ Supabase connection successful');
+        alert('✅ Supabase connection successful');
+      }
+    });
+} else {
+  console.log('📊 Working in offline mode');
+  alert('📊 Working in offline mode');
+}
 },
 
 // View user profile (simple view)
@@ -1615,10 +1667,10 @@ Share WhatsApp
 <div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
 <div class="flex items-center justify-between mb-4">
 <h3 class="text-lg font-black text-slate-800">Kelola User Terdaftar</h3>
-<div class="flex gap-2">
+<div class="flex gap-2 flex-wrap">
 <button @click="refreshTasks" class="px-4 py-2 bg-green-100 text-green-600 rounded-xl text-sm font-bold hover:bg-green-200">🔄 Refresh Laporan</button>
 <button @click="refreshUserList" class="px-4 py-2 bg-blue-100 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-200">🔄 Refresh User</button>
-<button @click="debugData" class="px-4 py-2 bg-purple-100 text-purple-600 rounded-xl text-sm font-bold hover:bg-purple-200">🐛 Debug</button>
+<button @click="testConnection" class="px-4 py-2 bg-orange-100 text-orange-600 rounded-xl text-sm font-bold hover:bg-orange-200">🌐 Test Koneksi</button>
 </div>
 </div>
 <div class="space-y-4">
