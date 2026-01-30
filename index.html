@@ -997,35 +997,49 @@ await this.fetchTasks();
 alert('Daftar laporan berhasil diperbarui!');
 },
 
-// Combined refresh function for tasks and connection test
+// Combined refresh function for all data and connection test
 async refreshAllData(){
 console.log('🔄 Starting comprehensive data refresh...');
 try {
   // Test connection first
+  let connectionStatus = '📊 Mode Offline';
   if(window.supabaseClient && navigator.onLine) {
     console.log('🌐 Testing Supabase connection...');
     const { data, error } = await window.supabaseClient.from('users').select('count').limit(1);
     if(error) {
       console.warn('⚠️ Supabase connection failed, using offline mode');
-      alert('⚠️ Koneksi Supabase gagal. Menggunakan mode offline.');
+      connectionStatus = '⚠️ Koneksi Gagal';
     } else {
       console.log('✅ Supabase connection successful');
+      connectionStatus = '✅ Mode Online';
     }
-  } else {
-    console.log('📊 Working in offline mode');
   }
   
+  // Refresh users data
+  console.log('� Refreshing users...');
+  await this.fetchUsers();
+  
   // Refresh tasks data
+  console.log('📝 Refreshing tasks...');
   await this.fetchTasks();
+  
+  // Force sync from localStorage
+  console.log('🔄 Force syncing from localStorage...');
+  this.savedTasks = JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
+  this.registeredUsers = JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
   
   // Clear cache to ensure fresh data
   this._cachedAllTasks = null;
   this._cacheTimestamp = null;
   
-  console.log('✅ Data refresh completed');
+  console.log('✅ Comprehensive refresh completed');
+  console.log('📝 Tasks loaded:', this.savedTasks.length);
+  console.log('👤 Users loaded:', this.registeredUsers.length);
+  
   alert('🔄 Data berhasil diperbarui!\n\n' + 
-        (navigator.onLine ? '✅ Mode Online' : '📊 Mode Offline') + 
-        '\n📝 Total Laporan: ' + this.savedTasks.length);
+        connectionStatus + '\n' +
+        '📝 Total Laporan: ' + this.savedTasks.length + '\n' +
+        '👤 Total User: ' + this.registeredUsers.length);
         
 } catch(error) {
   console.error('❌ Refresh error:', error);
@@ -1793,9 +1807,7 @@ Share WhatsApp
 <div class="flex items-center justify-between mb-4">
 <h3 class="text-lg font-black text-slate-800">Kelola User Terdaftar</h3>
 <div class="flex gap-2 flex-wrap">
-<button @click="refreshAllData" class="px-4 py-2 bg-green-100 text-green-600 rounded-xl text-sm font-bold hover:bg-green-200">🔄 Refresh Data</button>
-<button @click="forceSyncData" class="px-4 py-2 bg-orange-100 text-orange-600 rounded-xl text-sm font-bold hover:bg-orange-200">🔄 Force Sync</button>
-<button @click="refreshUserList" class="px-4 py-2 bg-blue-100 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-200">🔄 Refresh User</button>
+<button @click="refreshAllData" class="px-4 py-2 bg-green-100 text-green-600 rounded-xl text-sm font-bold hover:bg-green-200">🔄 Refresh</button>
 </div>
 </div>
 <div class="space-y-4">
