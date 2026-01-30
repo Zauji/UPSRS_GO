@@ -619,6 +619,9 @@ async fetchTasks(){
       this.savedTasks = data;
       localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
       console.log('✅ Tasks fetched from Supabase:', data.length);
+      console.log('📝 Task samples:', data.slice(0, 3).map(t => ({id: t.id, teknisi: t.teknisi, user_id: t.user_id})));
+    } else if(error) {
+      console.error('❌ Supabase fetch error:', error);
     }
   } catch (error) {
     console.warn('⚠️ Failed to fetch tasks from Supabase, using localStorage:', error);
@@ -633,11 +636,14 @@ getAllUserTasks(){
 try{
 console.log('🔍 Getting all user tasks...');
 console.log('📊 Registered users:', this.registeredUsers.length);
+console.log('📝 Saved tasks:', this.savedTasks.length);
 const allTasks=[];
 this.regularUsers.forEach(user=>{
 console.log(`👤 Processing user: ${user.name} (${user.id})`);
-const userTasks=this.savedTasks.filter(task=>task.user_id===user.id || task.user_id===user.username);
+// Fix: Use teknisi field for consistency with data storage
+const userTasks=this.savedTasks.filter(task=>task.teknisi===user.name);
 console.log(`📝 Tasks for ${user.name}:`, userTasks.length);
+console.log('🔍 Task details:', userTasks.map(t => ({id: t.id, teknisi: t.teknisi, user_id: t.user_id})));
 userTasks.forEach(task=>{
 allTasks.push({...task,userProfile:user.profile_photo,userRole:user.role});
 });
@@ -660,7 +666,8 @@ return [];
 getUserStats(userId){
 const user = this.registeredUsers.find(u => u.id === userId);
 if(!user) return { totalTasks: 0, completedTasks: 0, pendingTasks: 0 };
-const userTasks = this.savedTasks.filter(t => t.user_id===user.id || t.user_id===user.username);
+// Fix: Use teknisi field for consistency
+const userTasks = this.savedTasks.filter(t => t.teknisi===user.name);
 return{
 totalTasks:userTasks.length,
 completedTasks:userTasks.filter(t=>t.statusPekerjaan==='Selesai').length,
@@ -911,6 +918,19 @@ alert('Daftar user berhasil diperbarui!');
 async refreshTasks(){
 await this.fetchTasks();
 alert('Daftar laporan berhasil diperbarui!');
+},
+
+// Debug function to check data consistency
+debugData(){
+console.log('=== DEBUG DATA ===');
+console.log('Current User:', this.currentUser);
+console.log('Registered Users:', this.registeredUsers.length);
+console.log('Regular Users:', this.regularUsers.length);
+console.log('Saved Tasks:', this.savedTasks.length);
+console.log('All User Tasks:', this.getAllUserTasks().length);
+console.log('Task Sample:', this.savedTasks.slice(0, 2));
+console.log('User Sample:', this.regularUsers.slice(0, 2));
+alert('Debug data logged to console. Check F12 > Console.');
 },
 
 // View user profile (simple view)
@@ -1598,6 +1618,7 @@ Share WhatsApp
 <div class="flex gap-2">
 <button @click="refreshTasks" class="px-4 py-2 bg-green-100 text-green-600 rounded-xl text-sm font-bold hover:bg-green-200">🔄 Refresh Laporan</button>
 <button @click="refreshUserList" class="px-4 py-2 bg-blue-100 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-200">🔄 Refresh User</button>
+<button @click="debugData" class="px-4 py-2 bg-purple-100 text-purple-600 rounded-xl text-sm font-bold hover:bg-purple-200">🐛 Debug</button>
 </div>
 </div>
 <div class="space-y-4">
