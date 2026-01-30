@@ -210,8 +210,8 @@ return [];
 get stats(){
 return{
 total:this.filteredTasks.length,
-selesai:this.filteredTasks.filter(t=>t.statusPekerjaan==='Selesai').length,
-pending:this.filteredTasks.filter(t=>t.statusPekerjaan==='Belum Selesai').length
+selesai:this.filteredTasks.filter(t=>t.status_pekerjaan==='Selesai').length,
+pending:this.filteredTasks.filter(t=>t.status_pekerjaan!=='Selesai').length
 }
 },
 
@@ -443,21 +443,20 @@ async simpanTugas() {
   try {
     const entry = {
       id: Date.now(),
-      user_id: this.currentUser.id || this.currentUser.username,
+      user_id: this.currentUser.id, // KUNCI UTAMA - WAJIB
       tanggal: dayjs().format('DD/MM/YYYY'),
       waktu: dayjs().format('HH:mm'),
-      teknisi: this.currentUser.name,
       gedung: this.newTask.gedung,
       ruangan: this.newTask.ruangan,
       pelapor: this.newTask.pelapor || '',
       masalah: this.newTask.masalah,
       penyelesaian: tindakan,
-      statusPekerjaan: this.newTask.statusPekerjaan,
+      status_pekerjaan: this.newTask.statusPekerjaan, // Perbaiki naming
       foto: this.newTask.foto,
       created_at: new Date().toISOString()
     };
 
-    // Try to save to Supabase first
+    // Try to save to Supabase first (WAJIB untuk user)
     if (window.supabaseClient) {
       try {
         const { error } = await window.supabaseClient
@@ -474,20 +473,13 @@ async simpanTugas() {
         // Fetch updated tasks from Supabase
         await this.fetchTasks();
       } catch (supabaseError) {
-        console.warn('Supabase save failed, using localStorage:', supabaseError);
-        
-        // Fallback to localStorage
-        this.savedTasks.push(entry);
-        localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
-        console.log('✅ Task saved to localStorage:', entry);
-        alert('✅ Laporan berhasil disimpan (Mode Offline)');
+        console.warn('Supabase save failed:', supabaseError);
+        alert('❌ Gagal menyimpan ke server. Pastikan koneksi internet stabil.');
+        return; // Jangan simpan ke localStorage jika Supabase gagal
       }
     } else {
-      // Offline mode - save to localStorage only
-      this.savedTasks.push(entry);
-      localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
-      console.log('✅ Task saved to localStorage:', entry);
-      alert('✅ Laporan berhasil disimpan (Mode Offline)');
+      alert('❌ Tidak ada koneksi ke server. Pastikan online untuk menyimpan laporan.');
+      return;
     }
 
     /* ================= RESET FORM ================= */
@@ -603,9 +595,10 @@ async fetchUsers(){
 },
 
 async fetchTasks(){
-  // Skip if Supabase is not available (offline mode)
+  // Skip if Supabase is not available - ADMIN HARUS ONLINE
   if (!window.supabaseClient) {
-    console.log('📊 Using localStorage for tasks (offline mode)');
+    console.error('❌ Supabase client not available. Admin must be online to fetch tasks.');
+    this.savedTasks = [];
     return;
   }
 
@@ -620,25 +613,29 @@ async fetchTasks(){
       .select('*')
       .order('created_at', { ascending: false });
 
-    if(!error && data){
-      this.savedTasks = data;
-      localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
-      console.log('✅ Tasks fetched from Supabase:', data.length);
-      console.log('📝 Task samples:', data.slice(0, 3).map(t => ({id: t.id, teknisi: t.teknisi, user_id: t.user_id})));
-    } else if(error) {
-      console.error('❌ Supabase fetch error:', error);
-      console.log('📊 Falling back to localStorage due to Supabase error');
-      // Ensure we have localStorage data as fallback
-      const localTasks = JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
-      this.savedTasks = localTasks;
-      console.log('📊 Using localStorage fallback:', localTasks.length);
+    if(error) {
+      console.error('❌ Failed to fetch tasks from Supabase:', error);
+      this.savedTasks = [];
+      return;
     }
+
+    if(data && data.length > 0) {
+      this.savedTasks = data;
+      console.log('✅ Tasks fetched from Supabase:', data.length);
+      console.log('📝 Task samples:', data.slice(0, 3).map(t => ({
+        id: t.id, 
+        user_id: t.user_id, 
+        status_pekerjaan: t.status_pekerjaan,
+        tanggal: t.tanggal
+      })));
+    } else {
+      this.savedTasks = [];
+      console.log('� No tasks found in Supabase');
+    }
+    
   } catch (error) {
-    console.warn('⚠️ Failed to fetch tasks from Supabase, using localStorage:', error);
-    // Ensure we have localStorage data as fallback
-    const localTasks = JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
-    this.savedTasks = localTasks;
-    console.log('📊 Using localStorage fallback:', localTasks.length);
+    console.error('❌ Critical error fetching tasks:', error);
+    this.savedTasks = [];
   }
 },
 
@@ -710,11 +707,16 @@ if(this._cachedAllTasks && this._cacheTimestamp && (Date.now() - this._cacheTime
 const allTasks=[];
 this.regularUsers.forEach(user=>{
 console.log(`👤 Processing user: ${user.name} (${user.id})`);
-// Fix: Use teknisi field for consistency with data storage
-const userTasks=this.savedTasks.filter(task=>task.teknisi===user.name);
+// BENAR: Gunakan user_id untuk filtering
+const userTasks=this.savedTasks.filter(task=>task.user_id===user.id);
 console.log(`📝 Tasks for ${user.name}:`, userTasks.length);
 if(userTasks.length > 0) {
-  console.log('🔍 Task details:', userTasks.map(t => ({id: t.id, teknisi: t.teknisi, user_id: t.user_id})));
+  console.log('🔍 Task details:', userTasks.map(t => ({
+    id: t.id, 
+    user_id: t.user_id, 
+    status_pekerjaan: t.status_pekerjaan,
+    tanggal: t.tanggal
+  })));
 }
 userTasks.forEach(task=>{
 allTasks.push({...task,userProfile:user.profile_photo,userRole:user.role});
@@ -743,12 +745,12 @@ return [];
 getUserStats(userId){
 const user = this.registeredUsers.find(u => u.id === userId);
 if(!user) return { totalTasks: 0, completedTasks: 0, pendingTasks: 0 };
-// Fix: Use teknisi field for consistency
-const userTasks = this.savedTasks.filter(t => t.teknisi===user.name);
+// BENAR: Gunakan user_id untuk filtering
+const userTasks = this.savedTasks.filter(t => t.user_id===user.id);
 return{
 totalTasks:userTasks.length,
-completedTasks:userTasks.filter(t=>t.statusPekerjaan==='Selesai').length,
-pendingTasks:userTasks.filter(t=>t.statusPekerjaan==='Belum Selesai').length
+completedTasks:userTasks.filter(t=>t.status_pekerjaan==='Selesai').length,
+pendingTasks:userTasks.filter(t=>t.status_pekerjaan!=='Selesai').length
 }
 },
 
@@ -760,9 +762,9 @@ const now=dayjs();
 return{
 todayTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'day')).length,
 weeklyTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
-thisWeekCompleted:allTasks.filter(t=>t.statusPekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
+thisWeekCompleted:allTasks.filter(t=>t.status_pekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
 monthlyTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length,
-thisMonthCompleted:allTasks.filter(t=>t.statusPekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length
+thisMonthCompleted:allTasks.filter(t=>t.status_pekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length
 };
 }catch(error){
 console.error('Error in adminStats:', error);
@@ -997,53 +999,53 @@ await this.fetchTasks();
 alert('Daftar laporan berhasil diperbarui!');
 },
 
-// Combined refresh function for all data and connection test
+// Combined refresh function for real server refresh only
 async refreshAllData(){
-console.log('🔄 Starting comprehensive data refresh...');
+console.log('🔄 Starting real server refresh...');
 try {
   // Test connection first
-  let connectionStatus = '📊 Mode Offline';
+  let connectionStatus = '❌ Tidak Ada Koneksi';
   if(window.supabaseClient && navigator.onLine) {
     console.log('🌐 Testing Supabase connection...');
     const { data, error } = await window.supabaseClient.from('users').select('count').limit(1);
     if(error) {
-      console.warn('⚠️ Supabase connection failed, using offline mode');
+      console.warn('⚠️ Supabase connection failed:', error);
       connectionStatus = '⚠️ Koneksi Gagal';
+      alert('❌ Gagal terhubung ke server. Pastikan koneksi internet stabil.');
+      return;
     } else {
       console.log('✅ Supabase connection successful');
       connectionStatus = '✅ Mode Online';
     }
+  } else {
+    alert('❌ Tidak ada koneksi internet. Admin harus online untuk refresh data.');
+    return;
   }
   
-  // Refresh users data
-  console.log('� Refreshing users...');
+  // Refresh users data from server
+  console.log('� Refreshing users from server...');
   await this.fetchUsers();
   
-  // Refresh tasks data
-  console.log('📝 Refreshing tasks...');
+  // Refresh tasks data from server
+  console.log('� Refreshing tasks from server...');
   await this.fetchTasks();
-  
-  // Force sync from localStorage
-  console.log('🔄 Force syncing from localStorage...');
-  this.savedTasks = JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
-  this.registeredUsers = JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
   
   // Clear cache to ensure fresh data
   this._cachedAllTasks = null;
   this._cacheTimestamp = null;
   
-  console.log('✅ Comprehensive refresh completed');
-  console.log('📝 Tasks loaded:', this.savedTasks.length);
-  console.log('👤 Users loaded:', this.registeredUsers.length);
+  console.log('✅ Server refresh completed');
+  console.log('📝 Tasks loaded from server:', this.savedTasks.length);
+  console.log('👤 Users loaded from server:', this.registeredUsers.length);
   
-  alert('🔄 Data berhasil diperbarui!\n\n' + 
+  alert('🔄 Data berhasil diperbarui dari server!\n\n' + 
         connectionStatus + '\n' +
         '📝 Total Laporan: ' + this.savedTasks.length + '\n' +
         '👤 Total User: ' + this.registeredUsers.length);
         
 } catch(error) {
-  console.error('❌ Refresh error:', error);
-  alert('❌ Gagal refresh data: ' + error.message);
+  console.error('❌ Server refresh error:', error);
+  alert('❌ Gagal refresh data dari server: ' + error.message);
 }
 },
 
