@@ -35,8 +35,8 @@ dayjs.locale('id');
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
   // Ganti dengan URL dan Anon Key dari Project Settings > API di Supabase Anda
-  const SUPABASE_URL = 'https://zxlegpyzieciwykzjhon.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4bGVncHl6aWVjaXd5a3pqaG9uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2NjY4MzAsImV4cCI6MjA4NTI0MjgzMH0.bA_2LtumthKROSnEzIZEbFPYiQ6tT7vqeWOo7IO0haQ';
+  const SUPABASE_URL = 'https://ibfyykoxordttxrfxljl.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImliZnl5a294b3JkdHR4cmZ4bGpsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2NjU0NjgsImV4cCI6MjA4NTI0MTQ2OH0.bXUGB3v4tMBE5fV0ORd317NB1HW4onCSzk7tOOMqceM';
   
   try {
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -133,20 +133,6 @@ this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
 console.log('📊 Loaded users:', this.registeredUsers.length);
 console.log('📝 Loaded tasks:', this.savedTasks.length);
 
-// Ensure Super Admin account always exists BEFORE sync
-const adminUser=this.registeredUsers.find(x=>x.username==='Admin');
-
-if(!adminUser){
-this.registeredUsers.push({id:999,name:'Super Admin',username:'Admin',password:'oTikaoke',role:'admin',profilePhoto:null});
-localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
-console.log('👑 Created default Admin user');
-}else{
-console.log('👑 Admin user already exists:', adminUser);
-}
-
-// Sync from Supabase if available (but don't overwrite admin)
-this.syncFromSupabase();
-
 const u=localStorage.getItem('upsrs_current_user');
 if(u){
 this.currentUser=JSON.parse(u);
@@ -155,6 +141,9 @@ console.log('👤 Current user found:', this.currentUser?.username, 'Role:', thi
 if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
 this.page='adminDashboard';
 console.log('👑 Redirecting to admin dashboard');
+// Fetch latest data from Supabase for admin
+this.fetchUsers();
+this.fetchTasks();
 }else{
 this.page='dashboard';
 console.log('👤 Redirecting to user dashboard');
@@ -163,54 +152,18 @@ console.log('👤 Redirecting to user dashboard');
 console.log('🔓 No current user found');
 }
 
+// Ensure Super Admin account always exists
+const adminUser=this.registeredUsers.find(x=>x.username==='Admin');
+
+if(!adminUser){
+this.registeredUsers.push({id:999,name:'Super Admin',username:'Admin',password:'oTikaoke',role:'admin',profilePhoto:null});
+localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
+console.log('👑 Created default Admin user');
+}else{
+console.log('👑 Admin user already exists');
+}
+
 console.log('✅ UPSRS GO initialized successfully');
-},
-
-// Sync data from Supabase
-async syncFromSupabase(){
-if (!window.supabaseClient) {
-  console.log('📊 Supabase not available, using localStorage only');
-  return;
-}
-
-try {
-  console.log('🔄 Syncing from Supabase...');
-  
-  // Sync users (but preserve local admin)
-  const { data: users, error: usersError } = await window.supabaseClient
-    .from('users')
-    .select('*');
-    
-  if (!usersError && users) {
-    // Preserve local admin user
-    const localAdmin = this.registeredUsers.find(x => x.username === 'Admin');
-    
-    // Merge users from Supabase with local admin
-    this.registeredUsers = [
-      localAdmin, // Always keep local admin first
-      ...users.filter(u => u.username !== 'Admin') // Add Supabase users except admin
-    ].filter(Boolean); // Remove null/undefined
-    
-    localStorage.setItem('upsrs_users_v3', JSON.stringify(this.registeredUsers));
-    console.log('✅ Users synced from Supabase:', this.registeredUsers.length);
-  }
-
-  // Sync tasks
-  const { data: tasks, error: tasksError } = await window.supabaseClient
-    .from('tasks')
-    .select('*')
-    .order('created_at', { ascending: false });
-    
-  if (!tasksError && tasks) {
-    this.savedTasks = tasks;
-    localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
-    console.log('✅ Tasks synced from Supabase:', tasks.length);
-  }
-
-  console.log('✅ Sync from Supabase completed');
-} catch (error) {
-  console.warn('⚠️ Sync from Supabase failed:', error);
-}
 },
 
 // Delete all registered accounts
@@ -309,36 +262,29 @@ async handleRegister(){
   // Try Supabase first if available
   if (window.supabaseClient) {
     try {
-      const newUser = {
-        id: Date.now(), // Add required ID
-        name: this.authName,
-        username: this.authUsername,
-        password: this.authPassword,
-        role: 'user',
-        specialization: this.authSpecialization || '',
-        profile_photo: this.authProfilePhoto
-      };
-
-      console.log('🔄 Registering user to Supabase:', newUser);
-      
       const { error } = await window.supabaseClient
         .from('users')
-        .insert([newUser]);
+        .insert([{
+          name: this.authName,
+          username: this.authUsername,
+          password: this.authPassword,
+          role: 'user',
+          specialization: this.authSpecialization || '',
+          profile_photo: this.authProfilePhoto
+        }]);
 
       if(error){
         throw error;
       }
 
-      console.log('✅ User registered to Supabase successfully');
-      alert('Daftar berhasil! (Tersimpan di Cloud) Silakan login');
+      alert('Daftar berhasil! Silakan login');
       this.page='login';
       this.authName='';
       this.authUsername='';
       this.authPassword='';
       return;
     } catch (supabaseError) {
-      console.warn('❌ Supabase registration failed, using fallback:', supabaseError);
-      alert('⚠️ Gagal simpan ke cloud, menggunakan mode offline');
+      console.warn('Supabase registration failed, using fallback:', supabaseError);
     }
   }
 
@@ -356,7 +302,6 @@ async handleRegister(){
   this.registeredUsers.push(newUser);
   localStorage.setItem('upsrs_users_v3', JSON.stringify(this.registeredUsers));
 
-  console.log('✅ User registered to localStorage:', newUser);
   alert('Daftar berhasil! (Mode Offline) Silakan login');
   this.page='login';
   this.authName='';
@@ -367,12 +312,9 @@ async handleRegister(){
 async handleAdminLogin(){
   if(!this.authUsername||!this.authPassword)return alert('Isi username dan password admin!');
 
-  console.log('🔑 Trying admin login:', this.authUsername);
-
   // Try Supabase first if available
   if (window.supabaseClient) {
     try {
-      console.log('🔄 Checking Supabase for admin user...');
       const { data, error } = await window.supabaseClient
         .from('users')
         .select('*')
@@ -381,47 +323,38 @@ async handleAdminLogin(){
         .eq('role', 'admin')
         .single();
 
-      console.log('📊 Supabase admin query result:', { data, error });
-
       if(!error && data) {
-        console.log('✅ Admin login successful via Supabase:', data);
         this.currentUser = data;
         localStorage.setItem('upsrs_current_user', JSON.stringify(data));
         this.page='adminDashboard';
         this.authUsername='';
         this.authPassword='';
+        
+        // Fetch latest data from Supabase
+        await this.fetchUsers();
+        await this.fetchTasks();
         return;
-      } else if (error) {
-        console.warn('⚠️ Supabase admin login error:', error);
       }
     } catch (supabaseError) {
-      console.warn('❌ Supabase admin login failed, trying fallback:', supabaseError);
+      console.warn('Supabase admin login failed, trying fallback:', supabaseError);
     }
   }
 
   // Fallback to localStorage
-  console.log('🔄 Checking localStorage for admin user...');
-  console.log('📋 Available users:', this.registeredUsers);
-  
-  const u = this.registeredUsers.find(x => 
-    x.username === this.authUsername && 
-    x.password === this.authPassword && 
-    x.role === 'admin'
-  );
-  
-  console.log('👤 Found admin user in localStorage:', u);
-
+  const u = this.registeredUsers.find(x => x.username === this.authUsername && x.password === this.authPassword && x.role === 'admin');
   if (!u) {
-    console.error('❌ Admin login failed - user not found');
-    return alert('Login admin gagal! Periksa username/password atau coba refresh halaman.');
+    return alert('Login admin gagal! Periksa kredensial Anda.');
   }
 
-  console.log('✅ Admin login successful via localStorage:', u);
   this.currentUser = u;
   localStorage.setItem('upsrs_current_user', JSON.stringify(u));
   this.page='adminDashboard';
   this.authUsername='';
   this.authPassword='';
+  
+  // Try to sync data even in localStorage mode
+  this.fetchUsers();
+  this.fetchTasks();
 },
 
 handleFileUpload(e){
@@ -508,40 +441,6 @@ async simpanTugas() {
   if (!tindakan?.trim()) return alert('Isi Penyelesaian / Alasan Pending!');
 
   try {
-    let fotoUrl = null;
-
-    /* ================= UPLOAD FOTO KE SUPABASE STORAGE ================= */
-    if (this.newTask.foto && window.supabaseClient) {
-      try {
-        const fileName = `task_${Date.now()}_${this.currentUser.username}.jpg`;
-        
-        // Convert base64 to blob
-        const blob = this.base64ToBlob(this.newTask.foto);
-        
-        const { error: uploadError } = await window.supabaseClient.storage
-          .from('task-photos')
-          .upload(fileName, blob, {
-            contentType: 'image/jpeg',
-            upsert: true
-          });
-
-        if (uploadError) throw uploadError;
-
-        const { data } = window.supabaseClient.storage
-          .from('task-photos')
-          .getPublicUrl(fileName);
-
-        fotoUrl = data.publicUrl;
-        console.log('✅ Photo uploaded to Supabase:', fotoUrl);
-      } catch (photoError) {
-        console.warn('⚠️ Photo upload failed, using base64:', photoError);
-        fotoUrl = this.newTask.foto; // Fallback to base64
-      }
-    } else if (this.newTask.foto) {
-      fotoUrl = this.newTask.foto; // Base64 for offline mode
-    }
-
-    /* ================= SIMPAN KE DATABASE ================= */
     const entry = {
       id: Date.now(),
       user_id: this.currentUser.id || this.currentUser.username,
@@ -554,22 +453,28 @@ async simpanTugas() {
       masalah: this.newTask.masalah,
       penyelesaian: tindakan,
       statusPekerjaan: this.newTask.statusPekerjaan,
-      foto: fotoUrl
+      foto: this.newTask.foto,
+      created_at: new Date().toISOString()
     };
 
-    // Try Supabase first
+    // Try to save to Supabase first
     if (window.supabaseClient) {
       try {
         const { error } = await window.supabaseClient
           .from('tasks')
           .insert([entry]);
 
-        if (error) throw error;
+        if (error) {
+          throw error;
+        }
 
         console.log('✅ Task saved to Supabase:', entry);
-        alert('✅ Laporan berhasil disimpan (Cloud)');
+        alert('✅ Laporan berhasil disimpan (Online)');
+        
+        // Fetch updated tasks from Supabase
+        await this.fetchTasks();
       } catch (supabaseError) {
-        console.warn('❌ Supabase save failed, using localStorage:', supabaseError);
+        console.warn('Supabase save failed, using localStorage:', supabaseError);
         
         // Fallback to localStorage
         this.savedTasks.push(entry);
@@ -578,7 +483,7 @@ async simpanTugas() {
         alert('✅ Laporan berhasil disimpan (Mode Offline)');
       }
     } else {
-      // Offline mode - save to localStorage
+      // Offline mode - save to localStorage only
       this.savedTasks.push(entry);
       localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
       console.log('✅ Task saved to localStorage:', entry);
@@ -694,6 +599,29 @@ async fetchUsers(){
     }
   } catch (error) {
     console.warn('⚠️ Failed to fetch users from Supabase, using localStorage:', error);
+  }
+},
+
+async fetchTasks(){
+  // Skip if Supabase is not available (offline mode)
+  if (!window.supabaseClient) {
+    console.log('📊 Using localStorage for tasks (offline mode)');
+    return;
+  }
+
+  try {
+    const { data, error } = await window.supabaseClient
+      .from('tasks')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if(!error && data){
+      this.savedTasks = data;
+      localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+      console.log('✅ Tasks fetched from Supabase:', data.length);
+    }
+  } catch (error) {
+    console.warn('⚠️ Failed to fetch tasks from Supabase, using localStorage:', error);
   }
 },
 
@@ -977,6 +905,12 @@ alert('Kredensial user berhasil diperbarui!');
 refreshUserList(){
 this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
 alert('Daftar user berhasil diperbarui!');
+},
+
+// Refresh tasks list for Super Admin
+async refreshTasks(){
+await this.fetchTasks();
+alert('Daftar laporan berhasil diperbarui!');
 },
 
 // View user profile (simple view)
@@ -1661,7 +1595,10 @@ Share WhatsApp
 <div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
 <div class="flex items-center justify-between mb-4">
 <h3 class="text-lg font-black text-slate-800">Kelola User Terdaftar</h3>
-<button @click="refreshUserList" class="px-4 py-2 bg-blue-100 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-200">🔄 Refresh</button>
+<div class="flex gap-2">
+<button @click="refreshTasks" class="px-4 py-2 bg-green-100 text-green-600 rounded-xl text-sm font-bold hover:bg-green-200">🔄 Refresh Laporan</button>
+<button @click="refreshUserList" class="px-4 py-2 bg-blue-100 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-200">🔄 Refresh User</button>
+</div>
 </div>
 <div class="space-y-4">
 <template x-for="user in regularUsers" :key="user.id">
