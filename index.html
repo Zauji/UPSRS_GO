@@ -682,13 +682,23 @@ async fetchTasks(){
       })));
     } else {
       this.savedTasks = [];
-      console.log('� No tasks found in Supabase');
+      console.log('📝 No tasks found in Supabase');
     }
+    
+    // Clear cache saat data berubah
+    this.clearCache();
     
   } catch (error) {
     console.error('❌ Critical error fetching tasks:', error);
     this.savedTasks = [];
   }
+},
+
+// Clear cache function
+clearCache(){
+  this._cachedAllTasks = null;
+  this._cacheTimestamp = null;
+  console.log('🧹 Cache cleared');
 },
 
 // Ensure tasks table exists in Supabase
@@ -751,7 +761,7 @@ console.log('📊 Registered users:', this.registeredUsers.length);
 console.log('📝 Saved tasks:', this.savedTasks.length);
 
 // Return cached result if available and data hasn't changed
-if(this._cachedAllTasks && this._cacheTimestamp && (Date.now() - this._cacheTimestamp < 5000)){
+if(this._cachedAllTasks && this._cacheTimestamp && (Date.now() - this._cacheTimestamp < 10000)){
   console.log('📋 Using cached all tasks result');
   return this._cachedAllTasks;
 }
@@ -782,7 +792,7 @@ return dateB.isAfter(dateA)?1:-1;
 });
 console.log('✅ Sorted all tasks:', sorted.length);
 
-// Cache the result
+// Cache the result dengan timestamp yang lebih lama
 this._cachedAllTasks = sorted;
 this._cacheTimestamp = Date.now();
 
@@ -1050,11 +1060,13 @@ async refreshTasks(){
 await this.fetchTasks();
 alert('Daftar laporan berhasil diperbarui!');
 },
-
 // Combined refresh function for real server refresh only
 async refreshAllData(){
 console.log('🔄 Starting real server refresh...');
 try {
+  // Clear cache first
+  this.clearCache();
+  
   // Test connection first
   let connectionStatus = '❌ Tidak Ada Koneksi';
   if(window.supabaseClient && navigator.onLine) {
@@ -1075,16 +1087,12 @@ try {
   }
   
   // Refresh users data from server
-  console.log('� Refreshing users from server...');
+  console.log('👤 Refreshing users from server...');
   await this.fetchUsers();
   
   // Refresh tasks data from server
-  console.log('� Refreshing tasks from server...');
+  console.log('📝 Refreshing tasks from server...');
   await this.fetchTasks();
-  
-  // Clear cache to ensure fresh data
-  this._cachedAllTasks = null;
-  this._cacheTimestamp = null;
   
   console.log('✅ Server refresh completed');
   console.log('📝 Tasks loaded from server:', this.savedTasks.length);
