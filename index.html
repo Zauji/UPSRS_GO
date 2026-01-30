@@ -973,21 +973,57 @@ this.page='editPendingTask';
 },
 
 // Save edited pending task
-saveEditedTask(){
+async saveEditedTask(){
 if(!this.editingTask.newPenyelesaian||!this.editingTask.newPenyelesaian.trim()){
 return alert('Isi penyelesaian pekerjaan!');
 }
 
 const taskIndex=this.savedTasks.findIndex(t=>t.id===this.editingTask.id);
 if(taskIndex!==-1){
-this.savedTasks[taskIndex]={
+// Update task data
+const updatedTask={
 ...this.savedTasks[taskIndex],
 statusPekerjaan:'Selesai',
 penyelesaian:this.editingTask.newPenyelesaian,
 waktuSelesai:dayjs().format('HH:mm'),
 tanggalSelesai:dayjs().format('DD/MM/YYYY')
 };
+
+// Try to update in Supabase first (if online)
+if(window.supabaseClient && navigator.onLine) {
+  try {
+    console.log('🔄 Updating task in Supabase:', this.editingTask.id);
+    const { error } = await window.supabaseClient
+      .from('tasks')
+      .update({
+        status_pekerjaan: 'Selesai',
+        penyelesaian: this.editingTask.newPenyelesaian,
+        waktu_selesai: dayjs().format('HH:mm'),
+        tanggal_selesai: dayjs().format('DD/MM/YYYY')
+      })
+      .eq('id', this.editingTask.id);
+    
+    if(error) {
+      console.warn('⚠️ Failed to update task in Supabase, updating localStorage only:', error);
+      alert('⚠️ Gagal update di server, mengupdate local storage saja.');
+    } else {
+      console.log('✅ Task updated in Supabase successfully');
+    }
+  } catch(supabaseError) {
+    console.warn('⚠️ Supabase update error, updating localStorage only:', supabaseError);
+    alert('⚠️ Tidak ada koneksi, mengupdate local storage saja.');
+  }
+} else {
+  console.log('📊 Offline mode - updating localStorage only');
+}
+
+// Always update localStorage
+this.savedTasks[taskIndex]=updatedTask;
 localStorage.setItem('upsrs_tasks_v3',JSON.stringify(this.savedTasks));
+
+// Clear cache to refresh data
+this.clearCache();
+
 alert('Status pekerjaan berhasil diperbarui!');
 
 // Redirect based on user role
@@ -1278,13 +1314,38 @@ return dateB.isAfter(dateA)?1:-1;
 },
 
 // Delete individual task
-deleteTask(taskId){
+async deleteTask(taskId){
 if(!confirm('Apakah Anda yakin ingin menghapus laporan ini? Tindakan ini tidak dapat dibatalkan!'))return;
 
 // Find and remove task
 const taskIndex = this.savedTasks.findIndex(t => t.id === taskId);
 if(taskIndex !== -1){
   const deletedTask = this.savedTasks[taskIndex];
+  
+  // Try to delete from Supabase first (if online)
+  if(window.supabaseClient && navigator.onLine) {
+    try {
+      console.log('🗑️ Deleting task from Supabase:', taskId);
+      const { error } = await window.supabaseClient
+        .from('tasks')
+        .delete()
+        .eq('id', taskId);
+      
+      if(error) {
+        console.warn('⚠️ Failed to delete from Supabase, removing from localStorage only:', error);
+        alert('⚠️ Gagal menghapus dari server, menghapus dari local storage saja.');
+      } else {
+        console.log('✅ Task deleted from Supabase successfully');
+      }
+    } catch(supabaseError) {
+      console.warn('⚠️ Supabase delete error, removing from localStorage only:', supabaseError);
+      alert('⚠️ Tidak ada koneksi, menghapus dari local storage saja.');
+    }
+  } else {
+    console.log('📊 Offline mode - deleting from localStorage only');
+  }
+  
+  // Always remove from localStorage
   this.savedTasks.splice(taskIndex, 1);
   
   // Update localStorage
@@ -1299,12 +1360,36 @@ if(taskIndex !== -1){
 }
 },
 
-deleteUser(userId){
+// Delete user and all their tasks
+async deleteUser(userId){
 if(!confirm('Apakah Anda yakin ingin menghapus user ini? Semua laporan user ini juga akan dihapus! Tindakan ini tidak dapat dibatalkan!'))return;
 
 // Get user info before deletion
 const user=this.registeredUsers.find(u=>u.id===userId);
 if(!user)return;
+
+// Try to delete from Supabase first (if online)
+if(window.supabaseClient && navigator.onLine) {
+  try {
+    console.log('🗑️ Deleting user tasks from Supabase for user:', userId);
+    const { error: taskError } = await window.supabaseClient
+      .from('tasks')
+      .delete()
+      .eq('user_id', userId);
+    
+    if(taskError) {
+      console.warn('⚠️ Failed to delete user tasks from Supabase:', taskError);
+      alert('⚠️ Gagal menghapus laporan dari server, menghapus dari local storage saja.');
+    } else {
+      console.log('✅ User tasks deleted from Supabase successfully');
+    }
+  } catch(supabaseError) {
+    console.warn('⚠️ Supabase delete error, removing from localStorage only:', supabaseError);
+    alert('⚠️ Tidak ada koneksi, menghapus dari local storage saja.');
+  }
+} else {
+  console.log('📊 Offline mode - deleting from localStorage only');
+}
 
 // Remove user from registered users
 this.registeredUsers=this.registeredUsers.filter(u=>u.id!==userId);
@@ -1315,6 +1400,9 @@ this.savedTasks=this.savedTasks.filter(task=>task.user_id!==user.id);
 // Update localStorage
 localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
 localStorage.setItem('upsrs_tasks_v3',JSON.stringify(this.savedTasks));
+
+// Clear cache to refresh data
+this.clearCache();
 
 alert(`User "${user.name}" dan semua laporannya berhasil dihapus!`);
 },
