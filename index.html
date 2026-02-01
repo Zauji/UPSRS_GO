@@ -250,6 +250,7 @@ _lastDebugLog: 0, // PERBAIKI: Throttle debug logging
 _cachedStats: null,
 _cachedStatsTimestamp: null,
 _statsCacheTimeout: 5000, // 5 detik cache
+_statsCalculationInProgress: false, // PERBAIKI: Debounce flag
 
 // OPTIMASI LANJUTAN: Pagination & Lazy Loading
 _currentPage: 1,
@@ -269,7 +270,7 @@ _usersCacheTimeout: 60000, // 1 minute cache for users
 isLoading: false,
 syncStatus: '',
 
-// PERBAIKI: Fungsi cache statistics
+// PERBAIKI: Fungsi cache statistics dengan debouncing
 getCachedStats(calculateFunction, cacheKey) {
   const now = Date.now();
   
@@ -283,10 +284,19 @@ getCachedStats(calculateFunction, cacheKey) {
   if (!this._cachedStats) {
     this._cachedStats = {};
   }
-  this._cachedStats[cacheKey] = calculateFunction();
-  this._cachedStatsTimestamp = now;
   
-  return this._cachedStats[cacheKey];
+  // PERBAIKI: Debounce calculation
+  if (!this._statsCalculationInProgress) {
+    this._statsCalculationInProgress = true;
+    
+    setTimeout(() => {
+      this._cachedStats[cacheKey] = calculateFunction();
+      this._cachedStatsTimestamp = now;
+      this._statsCalculationInProgress = false;
+    }, 100);
+  }
+  
+  return this._cachedStats[cacheKey] || calculateFunction();
 },
 
 // PERBAIKI: Clear cache stats
@@ -1922,11 +1932,6 @@ forceRefreshStats() {
     this.syncFromSupabase().then(() => {
       console.log('📊 Admin stats after force refresh:', this.stats);
       console.log('📊 Admin detailed stats after refresh:', this.adminStats);
-      
-      // Debug statistik detail
-      console.log('📊 Daily stats per user:', this.getDailyStatsPerUser());
-      console.log('📊 Weekly stats per user:', this.getWeeklyStatsPerUser());
-      console.log('📊 Monthly stats per user:', this.getMonthlyStatsPerUser());
     });
   }
 },
@@ -2090,188 +2095,138 @@ thisMonthCompleted:allTasks.filter(t=>t.status_pekerjaan==='Selesai' && dayjs(t.
 
 // Get detailed daily stats per user
 getDailyStatsPerUser(){
-try{
-// PERBAIKI: Gunakan savedTasks yang sudah sinkron dari Supabase
-const allTasks = this.savedTasks;
-const now = dayjs();
-const today = now.format('DD/MM/YYYY');
-const userStats = {};
+  try {
+    const allTasks = this.savedTasks;
+    const now = dayjs();
+    const today = now.format('DD/MM/YYYY');
+    const userStats = {};
 
-console.log('📊 Calculating daily stats per user from savedTasks:', {
-  totalTasks: allTasks.length,
-  today: today,
-  usersCount: this.registeredUsers.length
-});
+    this.registeredUsers.forEach(user => {
+      const userTasks = allTasks.filter(task => task.user_id === user.id && task.tanggal === today);
+      userStats[user.id] = {
+        userName: user.name,
+        totalTasks: userTasks.length,
+        completedTasks: userTasks.filter(t => t.status_pekerjaan === 'Selesai').length,
+        pendingTasks: userTasks.filter(t => t.status_pekerjaan !== 'Selesai').length,
+        tasks: userTasks
+      };
+    });
 
-this.registeredUsers.forEach(user => {
-  const userTasks = allTasks.filter(task => task.user_id === user.id && task.tanggal === today);
-  userStats[user.id] = {
-    userName: user.name,
-    totalTasks: userTasks.length,
-    completedTasks: userTasks.filter(t => t.status_pekerjaan === 'Selesai').length,
-    pendingTasks: userTasks.filter(t => t.status_pekerjaan !== 'Selesai').length,
-    tasks: userTasks
-  };
-  
-  console.log(`📊 User ${user.name} daily stats:`, {
-    userId: user.id,
-    totalTasks: userTasks.length,
-    completedTasks: userTasks.filter(t => t.status_pekerjaan === 'Selesai').length,
-    pendingTasks: userTasks.filter(t => t.status_pekerjaan !== 'Selesai').length
-  });
-});
-
-return userStats;
-} catch(error){
-  console.error('Error in getDailyStatsPerUser:', error);
-  return {};
-}
+    return userStats;
+  } catch(error) {
+    console.error('Error in getDailyStatsPerUser:', error);
+    return {};
+  }
 },
 
 // Get detailed weekly stats per user
 getWeeklyStatsPerUser(){
-try{
-// PERBAIKI: Gunakan savedTasks yang sudah sinkron dari Supabase
-const allTasks = this.savedTasks;
-const now = dayjs();
-const userStats = {};
+  try {
+    const allTasks = this.savedTasks;
+    const now = dayjs();
+    const userStats = {};
 
-console.log('📊 Calculating weekly stats per user from savedTasks:', {
-  totalTasks: allTasks.length,
-  weekStart: now.subtract(7, 'day').format('DD/MM/YYYY'),
-  usersCount: this.registeredUsers.length
-});
+    this.registeredUsers.forEach(user => {
+      const userTasks = allTasks.filter(task => task.user_id === user.id && dayjs(task.tanggal, 'DD/MM/YYYY').isAfter(now.subtract(7, 'day')));
+      userStats[user.id] = {
+        userName: user.name,
+        totalTasks: userTasks.length,
+        completedTasks: userTasks.filter(t => t.status_pekerjaan === 'Selesai').length,
+        pendingTasks: userTasks.filter(t => t.status_pekerjaan !== 'Selesai').length,
+        tasks: userTasks
+      };
+    });
 
-this.registeredUsers.forEach(user => {
-  const userTasks = allTasks.filter(task => task.user_id === user.id && dayjs(task.tanggal, 'DD/MM/YYYY').isAfter(now.subtract(7, 'day')));
-  userStats[user.id] = {
-    userName: user.name,
-    totalTasks: userTasks.length,
-    completedTasks: userTasks.filter(t => t.status_pekerjaan === 'Selesai').length,
-    pendingTasks: userTasks.filter(t => t.status_pekerjaan !== 'Selesai').length,
-    tasks: userTasks
-  };
-  
-  console.log(`📊 User ${user.name} weekly stats:`, {
-    userId: user.id,
-    totalTasks: userTasks.length,
-    completedTasks: userTasks.filter(t => t.status_pekerjaan === 'Selesai').length,
-    pendingTasks: userTasks.filter(t => t.status_pekerjaan !== 'Selesai').length
-  });
-});
-
-return userStats;
-} catch(error){
-  console.error('Error in getWeeklyStatsPerUser:', error);
-  return {};
-}
+    return userStats;
+  } catch(error) {
+    console.error('Error in getWeeklyStatsPerUser:', error);
+    return {};
+  }
 },
 
 // Get detailed monthly stats per user
 getMonthlyStatsPerUser(){
-try{
-// PERBAIKI: Gunakan savedTasks yang sudah sinkron dari Supabase
-const allTasks = this.savedTasks;
-const now = dayjs();
-const userStats = {};
+  try {
+    const allTasks = this.savedTasks;
+    const now = dayjs();
+    const userStats = {};
 
-console.log('📊 Calculating monthly stats per user from savedTasks:', {
-  totalTasks: allTasks.length,
-  currentMonth: now.format('MMMM YYYY'),
-  usersCount: this.registeredUsers.length
-});
+    this.registeredUsers.forEach(user => {
+      const userTasks = allTasks.filter(task => task.user_id === user.id && dayjs(task.tanggal, 'DD/MM/YYYY').isSame(now, 'month'));
+      userStats[user.id] = {
+        userName: user.name,
+        totalTasks: userTasks.length,
+        completedTasks: userTasks.filter(t => t.status_pekerjaan === 'Selesai').length,
+        pendingTasks: userTasks.filter(t => t.status_pekerjaan !== 'Selesai').length,
+        tasks: userTasks
+      };
+    });
 
-this.registeredUsers.forEach(user => {
-  const userTasks = allTasks.filter(task => task.user_id === user.id && dayjs(task.tanggal, 'DD/MM/YYYY').isSame(now, 'month'));
-  userStats[user.id] = {
-    userName: user.name,
-    totalTasks: userTasks.length,
-    completedTasks: userTasks.filter(t => t.status_pekerjaan === 'Selesai').length,
-    pendingTasks: userTasks.filter(t => t.status_pekerjaan !== 'Selesai').length,
-    tasks: userTasks
-  };
-  
-  console.log(`📊 User ${user.name} monthly stats:`, {
-    userId: user.id,
-    totalTasks: userTasks.length,
-    completedTasks: userTasks.filter(t => t.status_pekerjaan === 'Selesai').length,
-    pendingTasks: userTasks.filter(t => t.status_pekerjaan !== 'Selesai').length
-  });
-});
-
-return userStats;
-} catch(error){
-  console.error('Error in getMonthlyStatsPerUser:', error);
-  return {};
-}
+    return userStats;
+  } catch(error) {
+    console.error('Error in getMonthlyStatsPerUser:', error);
+    return {};
+  }
 },
 
 // Get weekly stats by week number (1-4)
 getWeeklyStatsByWeek(){
-try{
-// PERBAIKI: Gunakan savedTasks yang sudah sinkron dari Supabase
-const allTasks = this.savedTasks;
-const now = dayjs();
-const currentMonth = now.month();
-const currentYear = now.year();
-const weekStats = {};
+  try {
+    const allTasks = this.savedTasks;
+    const now = dayjs();
+    const currentMonth = now.month();
+    const currentYear = now.year();
+    const weekStats = {};
 
-console.log('📊 Calculating weekly stats by week from savedTasks:', {
-  totalTasks: allTasks.length,
-  currentMonth: now.format('MMMM'),
-  currentYear: currentYear,
-  usersCount: this.registeredUsers.length
-});
+    // Initialize weeks 1-4
+    for(let i = 1; i <= 4; i++){
+      weekStats[i] = {
+        weekNumber: i,
+        userStats: {},
+        totalTasks: 0,
+        totalCompleted: 0
+      };
+    }
 
-// Initialize weeks 1-4
-for(let i = 1; i <= 4; i++){
-  weekStats[i] = {
-    weekNumber: i,
-    userStats: {},
-    totalTasks: 0,
-    totalCompleted: 0
-  };
-}
+    this.registeredUsers.forEach(user => {
+      // Initialize user stats for each week
+      for(let i = 1; i <= 4; i++){
+        weekStats[i].userStats[user.id] = {
+          userName: user.name,
+          totalTasks: 0,
+          completedTasks: 0,
+          pendingTasks: 0
+        };
+      }
+    });
 
-this.registeredUsers.forEach(user => {
-  // Initialize user stats for each week
-  for(let i = 1; i <= 4; i++){
-    weekStats[i].userStats[user.id] = {
-      userName: user.name,
-      totalTasks: 0,
-completedTasks:0,
-pendingTasks:0
-};
-}
-});
+    allTasks.forEach(task => {
+      const taskDate = dayjs(task.tanggal, 'DD/MM/YYYY');
+      if(taskDate.month() === currentMonth && taskDate.year() === currentYear) {
+        // Calculate week number (1-4)
+        const firstDayOfMonth = taskDate.startOf('month');
+        const dayOfMonth = taskDate.date();
+        const weekNumber = Math.ceil((dayOfMonth + firstDayOfMonth.day()) / 7);
+        const adjustedWeekNumber = Math.min(weekNumber, 4); // Cap at 4
 
-allTasks.forEach(task=>{
-const taskDate=dayjs(task.tanggal,'DD/MM/YYYY');
-if(taskDate.month()===currentMonth && taskDate.year()===currentYear){
-// Calculate week number (1-4)
-const firstDayOfMonth=taskDate.startOf('month');
-const dayOfMonth=taskDate.date();
-const weekNumber=Math.ceil((dayOfMonth + firstDayOfMonth.day())/7);
-const adjustedWeekNumber=Math.min(weekNumber,4); // Cap at 4
+        if(weekStats[adjustedWeekNumber] && weekStats[adjustedWeekNumber].userStats[task.user_id]) {
+          weekStats[adjustedWeekNumber].userStats[task.user_id].totalTasks++;
+          weekStats[adjustedWeekNumber].totalTasks++;
+          if(task.status_pekerjaan === 'Selesai') {
+            weekStats[adjustedWeekNumber].userStats[task.user_id].completedTasks++;
+            weekStats[adjustedWeekNumber].totalCompleted++;
+          } else {
+            weekStats[adjustedWeekNumber].userStats[task.user_id].pendingTasks++;
+          }
+        }
+      }
+    });
 
-if(weekStats[adjustedWeekNumber] && weekStats[adjustedWeekNumber].userStats[task.user_id]){
-weekStats[adjustedWeekNumber].userStats[task.user_id].totalTasks++;
-weekStats[adjustedWeekNumber].totalTasks++;
-if(task.status_pekerjaan==='Selesai'){
-weekStats[adjustedWeekNumber].userStats[task.user_id].completedTasks++;
-weekStats[adjustedWeekNumber].totalCompleted++;
-}else{
-weekStats[adjustedWeekNumber].userStats[task.user_id].pendingTasks++;
-}
-}
-}
-});
-
-return weekStats;
-}catch(error){
-console.error('Error in getWeeklyStatsByWeek:', error);
-return{};
-}
+    return weekStats;
+  } catch(error) {
+    console.error('Error in getWeeklyStatsByWeek:', error);
+    return {};
+  }
 },
 
 // Force refresh admin stats
