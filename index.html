@@ -1090,6 +1090,104 @@ async testSupabaseRegistration() {
   console.log('🔍 ===== DEBUG REGISTRATION TEST END =====');
 },
 
+// PERBAIKI: Fungsi force reconnect Supabase
+async forceReconnectSupabase() {
+  console.log('🔄 ===== FORCE RECONNECT SUPABASE START =====');
+  
+  try {
+    // Step 1: Reset connection status
+    console.log('🔄 Step 1: Resetting connection status...');
+    window.supabaseHealthy = false;
+    
+    // Step 2: Reinitialize Supabase client
+    console.log('🔄 Step 2: Reinitializing Supabase client...');
+    const supabaseUrl = "https://zxlegpyzieciwykzjhon.supabase.co";
+    const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4bGVncHl6aWVjaXd5a3pqaG9uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2NjY4MzAsImV4cCI6MjA4NTI0MjgzMH0.bA_2LtumthKROSnEzIZEbFPYiQ6tT7vqeWOo7IO0haQ";
+    
+    window.supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+    console.log('✅ Supabase client reinitialized');
+    
+    // Step 3: Test basic connection
+    console.log('🔄 Step 3: Testing basic connection...');
+    const { data: testData, error: testError } = await window.supabaseClient
+      .from('users')
+      .select('count')
+      .limit(1);
+    
+    if (testError) {
+      console.error('❌ Connection test failed:', testError);
+      console.error('❌ Full error details:', {
+        message: testError.message,
+        details: testError.details,
+        hint: testError.hint,
+        code: testError.code
+      });
+      
+      window.supabaseHealthy = false;
+      alert('❌ Reconnect failed: ' + testError.message + '\n\nPossible causes:\n• Supabase URL incorrect\n• API Key expired\n• Network issues\n• Supabase service down');
+      return;
+    }
+    
+    // Step 4: Test table access
+    console.log('🔄 Step 4: Testing table access...');
+    const { data: tableData, error: tableError } = await window.supabaseClient
+      .from('users')
+      .select('*')
+      .limit(1);
+    
+    if (tableError) {
+      console.error('❌ Table access failed:', tableError);
+      window.supabaseHealthy = false;
+      alert('❌ Table access failed: ' + tableError.message + '\n\nPossible causes:\n• Table "users" not found\n• RLS policies blocking access\n• Insufficient permissions');
+      return;
+    }
+    
+    // Step 5: Success
+    console.log('✅ Connection successful!');
+    window.supabaseHealthy = true;
+    
+    // Step 6: Test insert permission
+    console.log('🔄 Step 6: Testing insert permission...');
+    const testUser = {
+      name: 'Connection Test User',
+      username: 'testuser' + Date.now(),
+      password: 'test123',
+      role: 'user',
+      specialization: 'Connection Test',
+      profile_photo: null
+    };
+    
+    const { data: insertData, error: insertError } = await window.supabaseClient
+      .from('users')
+      .insert([testUser])
+      .select();
+    
+    if (insertError) {
+      console.error('❌ Insert permission failed:', insertError);
+      console.warn('⚠️ Connection successful but insert permission denied');
+      alert('⚠️ Connected but INSERT permission denied!\n\nError: ' + insertError.message + '\n\nCheck RLS policies in Supabase dashboard');
+    } else {
+      console.log('✅ Insert permission confirmed!');
+      console.log('🗑️ Cleaning up test user...');
+      
+      // Clean up test user
+      await window.supabaseClient
+        .from('users')
+        .delete()
+        .eq('username', testUser.username);
+      
+      alert('✅ Supabase reconnection successful!\n\n🟢 Status: Online\n📊 Tables: Accessible\n✅ Permissions: Full access\n\nRegistration should work now!');
+    }
+    
+  } catch (reconnectError) {
+    console.error('❌ Reconnect error:', reconnectError);
+    window.supabaseHealthy = false;
+    alert('❌ Critical reconnect error: ' + reconnectError.message + '\n\nCheck:\n• Internet connection\n• Supabase credentials\n• Browser console for details');
+  }
+  
+  console.log('🔄 ===== FORCE RECONNECT SUPABASE END =====');
+},
+
 async handleAdminLogin(){
   if(!this.authUsername||!this.authPassword)return alert('Isi username dan password admin!');
 
@@ -2840,6 +2938,13 @@ base64ToBlob(base64) {
 <h1 class="text-3xl font-black text-slate-800">UPSRS <span class="text-blue-600">GO!</span></h1>
 <p class="text-xs text-slate-400 uppercase tracking-wider">Daftar Akun Baru</p>
 </div>
+
+<!-- Connection Status Indicator -->
+<div class="mb-4 p-3 rounded-lg text-center text-xs font-bold" 
+     :class="window.supabaseHealthy ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'">
+  <span x-text="window.supabaseHealthy ? '🟢 ONLINE - Supabase Connected' : '🔴 OFFLINE - Local Storage Mode'"></span>
+</div>
+
 <div class="mb-4">
 <input x-model="authName" type="text" class="input-style" placeholder="Nama Lengkap">
 </div>
@@ -2872,6 +2977,7 @@ base64ToBlob(base64) {
 </div>
 <button @click="handleRegister" class="w-full bg-blue-600 text-white py-4 rounded-xl font-bold hover:bg-blue-700 transition">DAFTAR</button>
 <button @click="testSupabaseRegistration" class="w-full bg-orange-500 text-white py-3 rounded-xl font-bold hover:bg-orange-600 transition mt-2">🔍 TEST DEBUG REGISTRATION</button>
+<button @click="forceReconnectSupabase" class="w-full bg-purple-500 text-white py-3 rounded-xl font-bold hover:bg-purple-600 transition mt-2">🔄 FORCE RECONNECT SUPABASE</button>
 <button @click="page='adminLogin'" class="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 transition mt-2">MASUK SEBAGAI ADMIN</button>
 <button @click="page='login'" class="w-full text-xs text-slate-500 mt-3 hover:text-blue-600">Sudah punya akun? Login</button>
 </div>
