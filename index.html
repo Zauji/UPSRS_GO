@@ -871,12 +871,20 @@ async fetchTasks(){
     return;
   }
 
-  // OPTIMASI: Check cache first
+  // OPTIMASI: Check cache first - tapi force fetch untuk admin
   const now = Date.now();
-  if(this._cachedAllTasks && this._cacheTimestamp && (now - this._cacheTimestamp) < this._cacheTimeout){
-    console.log('⚡ Using cached tasks, skipping fetch');
+  const isAdmin = this.currentUser?.role === 'admin';
+  
+  if(!isAdmin && this._cachedAllTasks && this._cacheTimestamp && (now - this._cacheTimestamp) < this._cacheTimeout){
+    console.log('⚡ Using cached tasks, skipping fetch (user mode)');
     this.savedTasks = this._cachedAllTasks;
     return;
+  }
+
+  // Admin selalu fetch fresh data
+  if(isAdmin){
+    console.log('👑 Admin user - force fetching fresh tasks from Supabase');
+    this.clearCache(); // Clear cache untuk admin
   }
 
   try {
@@ -2521,7 +2529,21 @@ Share WhatsApp
 </div>
 </div>
 <div class="flex gap-2">
+<button @click="async () => { await fetchTasks(); await fetchUsers(); }" class="px-4 py-2 bg-blue-100 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-200 flex items-center gap-2">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+Refresh Data
+</button>
 <button @click="logout" class="px-4 py-2 bg-red-100 text-red-600 rounded-xl text-sm font-bold hover:bg-red-200">Logout</button>
+</div>
+</div>
+
+<!-- OPTIMASI: Sync Status Indicator untuk Admin -->
+<div x-show="syncStatus" x-transition class="mb-4">
+<div class="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center gap-2">
+<template x-if="isLoading">
+<div class="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+</template>
+<p class="text-sm font-medium text-blue-800" x-text="syncStatus"></p>
 </div>
 </div>
 
