@@ -850,14 +850,18 @@ async fetchTasks(){
       return;
     }
 
-    // OPTIMASI: Map nama user dengan caching
+    console.log('📝 Raw tasks from Supabase:', tasks.length);
+
+    // OPTIMASI: Map nama user dengan caching dan field compatibility
     const userMap = new Map(this.registeredUsers.map(u => [u.id, u]));
     const formattedData = tasks.map(task => {
       const user = userMap.get(task.user_id);
       return {
         ...task,
         nama: user ? user.name : 'Unknown User',
-        username: user ? user.username : 'unknown'
+        username: user ? user.username : 'unknown',
+        // CRITICAL: Tambahkan field untuk compatibility dengan localStorage
+        statusPekerjaan: task.status_pekerjaan
       };
     });
 
@@ -870,11 +874,12 @@ async fetchTasks(){
     
     const endTime = performance.now();
     console.log(`✅ Tasks fetched in ${(endTime - startTime).toFixed(2)}ms:`, formattedData.length);
-    console.log('📝 Task samples:', formattedData.slice(0, 3).map(t => ({
+    console.log('📝 Formatted tasks sample:', formattedData.slice(0, 3).map(t => ({
       id: t.id,
       user_id: t.user_id,
       nama: t.nama,
       status_pekerjaan: t.status_pekerjaan,
+      statusPekerjaan: t.statusPekerjaan,
       tanggal: t.tanggal
     })));
 
@@ -918,6 +923,8 @@ async saveTask(){
       created_at: new Date().toISOString()
     };
 
+    console.log('🔄 Saving task with data:', entry);
+
     // OPTIMASI: Network health check
     if (window.supabaseClient && window.supabaseHealthy) {
       try {
@@ -939,12 +946,18 @@ async saveTask(){
 
         const endTime = performance.now();
         console.log(`✅ Task saved in ${(endTime - startTime).toFixed(2)}ms`);
+        console.log('📝 Saved task data:', data);
         
-        // OPTIMASI: Add to local cache immediately
+        // OPTIMASI: Add to local cache immediately dengan field yang konsisten
         entry.id = data.id;
+        // Tambahkan field untuk compatibility dengan localStorage
+        entry.statusPekerjaan = entry.status_pekerjaan;
+        
         this.savedTasks.unshift(entry);
         this._cachedAllTasks = null; // Invalidate cache
         localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+        
+        console.log('💾 Task added to local cache. Total tasks:', this.savedTasks.length);
         
         this.syncStatus = '✅ Laporan tersimpan!';
         setTimeout(() => {
@@ -974,25 +987,19 @@ async saveTask(){
           '❌ Tidak = Coba lagi nanti');
           
         if(useOffline) {
-          // Fallback ke localStorage dengan field lama
+          // Fallback ke localStorage dengan field yang konsisten
           const fallbackEntry = {
             ...entry,
             id: Date.now().toString(),
-            user_id: this.currentUser.id || this.currentUser.username,
-            teknisi: entry.teknisi,
-            gedung: entry.gedung,
-            ruangan: entry.ruangan,
-            tanggal: entry.tanggal,
-            waktu: entry.waktu,
-            pelapor: entry.pelapor,
-            masalah: entry.masalah,
-            penyelesaian: entry.penyelesaian,
+            // Pastikan kedua field ada untuk compatibility
             statusPekerjaan: entry.status_pekerjaan,
-            foto: entry.foto
+            status_pekerjaan: entry.status_pekerjaan
           };
           
           this.savedTasks.unshift(fallbackEntry);
           localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+          
+          console.log('💾 Task saved to localStorage. Total tasks:', this.savedTasks.length);
           
           this.syncStatus = '✅ Tersimpan offline';
           setTimeout(() => {
@@ -1014,11 +1021,15 @@ async saveTask(){
       const fallbackEntry = {
         ...entry,
         id: Date.now().toString(),
-        statusPekerjaan: entry.status_pekerjaan
+        // Pastikan kedua field ada untuk compatibility
+        statusPekerjaan: entry.status_pekerjaan,
+        status_pekerjaan: entry.status_pekerjaan
       };
       
       this.savedTasks.unshift(fallbackEntry);
       localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+      
+      console.log('💾 Task saved to localStorage (offline). Total tasks:', this.savedTasks.length);
       
       this.syncStatus = '✅ Tersimpan offline';
       setTimeout(() => {
