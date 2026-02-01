@@ -246,6 +246,11 @@ _isFetching: false,
 _lastFetchTime: null,
 _lastDebugLog: 0, // PERBAIKI: Throttle debug logging
 
+// PERBAIKI: Cache untuk statistics untuk menghindari infinite loop
+_cachedStats: null,
+_cachedStatsTimestamp: null,
+_statsCacheTimeout: 5000, // 5 detik cache
+
 // OPTIMASI LANJUTAN: Pagination & Lazy Loading
 _currentPage: 1,
 _pageSize: 50,
@@ -263,6 +268,32 @@ _usersCacheTimeout: 60000, // 1 minute cache for users
 // Loading states
 isLoading: false,
 syncStatus: '',
+
+// PERBAIKI: Fungsi cache statistics
+getCachedStats(calculateFunction, cacheKey) {
+  const now = Date.now();
+  
+  // Check cache
+  if (this._cachedStats && this._cachedStatsTimestamp && 
+      (now - this._cachedStatsTimestamp) < this._statsCacheTimeout) {
+    return this._cachedStats[cacheKey] || calculateFunction();
+  }
+  
+  // Calculate fresh stats
+  if (!this._cachedStats) {
+    this._cachedStats = {};
+  }
+  this._cachedStats[cacheKey] = calculateFunction();
+  this._cachedStatsTimestamp = now;
+  
+  return this._cachedStats[cacheKey];
+},
+
+// PERBAIKI: Clear cache stats
+clearStatsCache() {
+  this._cachedStats = null;
+  this._cachedStatsTimestamp = null;
+},
 
 // 🟢 LANGKAH 2 — Sync dari Supabase (OPTIMIZED)
 async syncFromSupabase() {
@@ -883,8 +914,8 @@ async handleRegister(){
         username: this.authUsername,
         password: this.authPassword,
         role: 'user',
-        specialization: this.authSpecialization || '',
-        profile_photo: this.authProfilePhoto
+        specialization: this.authSpecialization || ''
+        // PERBAIKI: Hapus profile_photo untuk menghindari HTTP 400
       };
       
       console.log('📊 User data to insert:', userData);
@@ -1783,6 +1814,9 @@ processFetchedTasks(tasks, startTime) {
     allTaskUserIds: [...new Set(this.savedTasks.map(t => t.user_id))]
   });
   
+  // PERBAIKI: Clear stats cache setelah data update
+  this.clearStatsCache();
+  
   // PERBAIKI: Handle localStorage quota error
   try {
     localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
@@ -1998,40 +2032,43 @@ pendingTasks:userTasks.filter(t=>t.status_pekerjaan!=='Selesai').length
 
 // Admin statistics getter
 get adminStats(){
-try{
-  // PERBAIKI: Gunakan savedTasks langsung untuk admin, bukan getAllUserTasks()
-  const allTasks = this.savedTasks; // Admin sudah lihat semua task
-  const now = dayjs();
-  
-  // DEBUG: Log untuk memeriksa data
-  console.log('🔍 DEBUG adminStats:', {
-    savedTasksLength: allTasks.length,
-    sampleData: allTasks.slice(0, 2),
-    currentUser: this.currentUser?.username,
-    isAdmin: this.currentUser?.role === 'admin'
-  });
-  
-  const stats = {
-    todayTasks: allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'day')).length,
-    weeklyTasks: allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
-    thisWeekCompleted: allTasks.filter(t=>t.status_pekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
-    monthlyTasks: allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length,
-    thisMonthCompleted: allTasks.filter(t=>t.status_pekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length
-  };
-  
-  console.log('📊 Final admin stats:', stats);
-  return stats;
-  
-}catch(error){
-console.error('Error in adminStats:', error);
-return{
-todayTasks:0,
-weeklyTasks:0,
-thisWeekCompleted:0,
-monthlyTasks:0,
-thisMonthCompleted:0
-}
-}
+  // PERBAIKI: Gunakan cache untuk menghindari infinite loop
+  return this.getCachedStats(() => {
+    try {
+      // PERBAIKI: Gunakan savedTasks langsung untuk admin, bukan getAllUserTasks()
+      const allTasks = this.savedTasks; // Admin sudah lihat semua task
+      const now = dayjs();
+      
+      // DEBUG: Log untuk memeriksa data
+      console.log('🔍 DEBUG adminStats:', {
+        savedTasksLength: allTasks.length,
+        sampleData: allTasks.slice(0, 2),
+        currentUser: this.currentUser?.username,
+        isAdmin: this.currentUser?.role === 'admin'
+      });
+      
+      const stats = {
+        todayTasks: allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'day')).length,
+        weeklyTasks: allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
+        thisWeekCompleted: allTasks.filter(t=>t.status_pekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
+        monthlyTasks: allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length,
+        thisMonthCompleted: allTasks.filter(t=>t.status_pekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length
+      };
+      
+      console.log('📊 Final admin stats:', stats);
+      return stats;
+      
+    } catch(error) {
+      console.error('Error in adminStats:', error);
+      return {
+        todayTasks: 0,
+        weeklyTasks: 0,
+        thisWeekCompleted: 0,
+        monthlyTasks: 0,
+        thisMonthCompleted: 0
+      };
+    }
+  }, 'adminStats');
 },
 
 getAdminStats(){
