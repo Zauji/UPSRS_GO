@@ -34,24 +34,40 @@ dayjs.locale('id');
 <!-- Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-  // Ganti dengan URL dan Anon Key dari Project Settings > API di Supabase Anda
-  const SUPABASE_URL = 'https://zxlegpyzieciwykzjhon.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4bGVncHl6aWVjaXd5a3pqaG9uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2NjY4MzAsImV4cCI6MjA4NTI0MjgzMH0.bA_2LtumthKROSnEzIZEbFPYiQ6tT7vqeWOo7IO0haQ';
-  
+  // Simple Supabase client initialization
+  const supabaseUrl = "https://zxlegpyzieciwykzjhon.supabase.co";
+  const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4bGVncHl6aWVjaXd5a3pqaG9uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2NjY4MzAsImV4cCI6MjA4NTI0MjgzMH0.bA_2LtumthKROSnEzIZEbFPYiQ6tT7vqeWOo7IO0haQ";
+
   try {
-    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    window.supabaseClient = supabaseClient;
-    console.log('✅ Supabase client initialized:', SUPABASE_URL);
+    window.supabaseClient = supabase.createClient(
+      supabaseUrl,
+      supabaseKey
+    );
+    
+    // OPTIMASI: Connection health check
+    window.supabaseHealthy = true;
+    
+    console.log('✅ Supabase client initialized (Simple):', supabaseUrl);
+    console.log('🌐 Environment:', window.location.hostname.includes('vercel.app') ? 'Vercel Production' : 'Local Development');
+    
   } catch (error) {
     console.error('❌ Failed to initialize Supabase client:', error);
     window.supabaseClient = null;
+    window.supabaseHealthy = false;
     console.warn('⚠️ Application will run in offline mode');
   }
+  
+  // OPTIMASI: Network status monitoring
+  window.addEventListener('online', () => {
+    console.log('🌐 Network online - enabling sync');
+    window.supabaseHealthy = true;
+  });
+  
+  window.addEventListener('offline', () => {
+    console.log('📵 Network offline - disabling sync');
+    window.supabaseHealthy = false;
+  });
 </script>
-
-<!-- ExcelJS & FileSaver -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 
 <!-- Google Fonts -->
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -132,44 +148,136 @@ newSpecialization:'',
 profile_photo:null
 },
 
+// Cache properties for performance
+_cachedAllTasks: null,
+_cacheTimestamp: null,
+_cacheTimeout: 30000, // 30 seconds cache
+_isFetching: false,
+_lastFetchTime: null,
+
+// OPTIMASI: User cache properties
+_cachedUsers: null,
+_usersCacheTimestamp: null,
+_usersCacheTimeout: 60000, // 1 minute cache for users
+
+// Loading states
+isLoading: false,
+syncStatus: '',
+
+// 🟢 LANGKAH 2 — Sync dari Supabase
+async syncFromSupabase() {
+  if (!this.currentUser) return
+
+  console.log('🔄 Syncing tasks from Supabase for user:', this.currentUser.id);
+  
+  const { data, error } = await window.supabaseClient
+    .from('tasks')
+    .select('*')
+    .eq('user_id', this.currentUser.id)
+
+  if (!error && data) {
+    this.savedTasks = data
+    localStorage.setItem('upsrs_tasks_v3', JSON.stringify(data))
+    console.log('✅ Tasks loaded from Supabase:', data.length)
+  } else {
+    console.warn('⚠️ Supabase gagal, pakai localStorage')
+  }
+},
+
+// 🟢 LANGKAH 5 — Setup realtime subscription
+setupRealtimeSubscription() {
+  if (!window.supabaseClient || !this.currentUser) return;
+  
+  console.log('🔄 Setting up realtime subscription...');
+  window.supabaseClient
+    .channel('tasks-realtime')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'tasks' },
+      () => {
+        console.log('📡 Realtime update received, syncing...');
+        this.syncFromSupabase();
+      }
+    )
+    .subscribe();
+},
+
 initApp(){
-console.log('🚀 Initializing UPSRS GO...');
-this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
-this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
-console.log('📊 Loaded users:', this.registeredUsers.length);
-console.log('📝 Loaded tasks:', this.savedTasks.length);
+  console.log('🚀 Initializing UPSRS GO...');
+  
+  // OPTIMASI: Load localStorage data immediately
+  const savedUsers = localStorage.getItem('upsrs_users_v3');
+  const savedTasks = localStorage.getItem('upsrs_tasks_v3');
+  const savedCurrentUser = localStorage.getItem('upsrs_current_user');
 
-const u=localStorage.getItem('upsrs_current_user');
-if(u){
-this.currentUser=JSON.parse(u);
-console.log('👤 Current user found:', this.currentUser?.username, 'Role:', this.currentUser?.role);
-// Check if current user is Super Admin and redirect to admin dashboard
-if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
-this.page='adminDashboard';
-console.log('👑 Redirecting to admin dashboard');
-// Fetch latest data from Supabase for admin
-this.fetchUsers();
-this.fetchTasks();
-}else{
-this.page='dashboard';
-console.log('👤 Redirecting to user dashboard');
-}
-}else{
-console.log('🔓 No current user found');
-}
+  if(savedUsers){
+    try {
+      this.registeredUsers = JSON.parse(savedUsers);
+      console.log('📊 Loaded users:', this.registeredUsers.length);
+    } catch(e) {
+      console.warn('⚠️ Failed to parse saved users:', e);
+      this.registeredUsers = [];
+    }
+  }
 
-// Ensure Super Admin account always exists
-const adminUser=this.registeredUsers.find(x=>x.username==='Admin');
+  if(savedTasks){
+    try {
+      this.savedTasks = JSON.parse(savedTasks);
+      console.log('📝 Loaded tasks:', this.savedTasks.length);
+    } catch(e) {
+      console.warn('⚠️ Failed to parse saved tasks:', e);
+      this.savedTasks = [];
+    }
+  }
 
-if(!adminUser){
-this.registeredUsers.push({id:999,name:'Super Admin',username:'Admin',password:'oTikaoke',role:'admin',profilePhoto:null});
-localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
-console.log('👑 Created default Admin user');
-}else{
-console.log('👑 Admin user already exists');
-}
+  if(savedCurrentUser){
+    try {
+      this.currentUser = JSON.parse(savedCurrentUser);
+      console.log('👤 Current user found:', this.currentUser?.username, 'Role:', this.currentUser?.role);
+      // Check if current user is Super Admin and redirect to admin dashboard
+      if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
+        this.page='adminDashboard';
+        console.log('👑 Redirecting to admin dashboard');
+      }else{
+        this.page='dashboard';
+        console.log('👤 Redirecting to user dashboard');
+      }
+    } catch(e) {
+      console.warn('⚠️ Failed to parse saved current user:', e);
+      this.currentUser = null;
+    }
+  }else{
+    console.log('🔓 No current user found');
+    this.page='login';
+  }
 
-console.log('✅ UPSRS GO initialized successfully');
+  // Ensure Super Admin account always exists
+  const adminUser=this.registeredUsers.find(x=>x.username==='Admin');
+
+  if(!adminUser){
+    this.registeredUsers.push({id:'admin',name:'Super Admin',username:'Admin',password:'admin123',role:'admin',profilePhoto:null});
+    localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
+    console.log('👑 Created default Admin user');
+  }else{
+    console.log('👑 Admin user already exists');
+  }
+
+  console.log('✅ UPSRS GO initialized successfully');
+
+  // 🟢 LANGKAH 5 — Realtime subscription (opsional)
+  if(window.supabaseClient && this.currentUser){
+    this.setupRealtimeSubscription();
+  }
+
+  // OPTIMASI: Background sync dengan delay untuk UI responsiveness
+  if(window.supabaseClient && this.currentUser){
+    console.log('🔄 Starting background sync...');
+    // Load users first, then tasks
+    setTimeout(async () => {
+      await this.fetchUsers();
+      await this.fetchTasks();
+    }, 500);
+  }
 },
 
 // Delete all registered accounts
@@ -236,8 +344,17 @@ async handleLogin(){
         .single();
 
       if (!error && data) {
+        console.log('✅ User found in Supabase:', data);
         this.currentUser = data;
         localStorage.setItem('upsrs_current_user', JSON.stringify(data));
+        console.log('👤 Current user set to:', this.currentUser);
+        
+        // 🟢 LANGKAH 2 — Panggil sync setelah login sukses
+        this.syncFromSupabase();
+        
+        // 🟢 LANGKAH 5 — Setup realtime setelah login
+        this.setupRealtimeSubscription();
+        
         this.page = data.role === 'admin' ? 'adminDashboard' : 'dashboard';
         this.authUsername = '';
         this.authPassword = '';
@@ -256,6 +373,13 @@ async handleLogin(){
 
   this.currentUser = u;
   localStorage.setItem('upsrs_current_user', JSON.stringify(u));
+  
+  // 🟢 LANGKAH 2 — Panggil sync setelah login sukses (fallback)
+  this.syncFromSupabase();
+  
+  // 🟢 LANGKAH 5 — Setup realtime setelah login
+  this.setupRealtimeSubscription();
+  
   this.page = u.role === 'admin' ? 'adminDashboard' : 'dashboard';
   this.authUsername = '';
   this.authPassword = '';
@@ -336,6 +460,12 @@ async handleAdminLogin(){
         this.authUsername='';
         this.authPassword='';
         
+        // 🟢 LANGKAH 2 — Panggil sync setelah admin login sukses
+        this.syncFromSupabase();
+        
+        // 🟢 LANGKAH 5 — Setup realtime setelah admin login
+        this.setupRealtimeSubscription();
+        
         // Fetch latest data from Supabase
         await this.fetchUsers();
         await this.fetchTasks();
@@ -357,6 +487,12 @@ async handleAdminLogin(){
   this.page='adminDashboard';
   this.authUsername='';
   this.authPassword='';
+  
+  // 🟢 LANGKAH 2 — Panggil sync setelah admin login sukses (fallback)
+  this.syncFromSupabase();
+  
+  // 🟢 LANGKAH 5 — Setup realtime setelah admin login
+  this.setupRealtimeSubscription();
   
   // Try to sync data even in localStorage mode
   this.fetchUsers();
@@ -658,25 +794,42 @@ async fetchUsers(){
 },
 
 async fetchTasks(){
-  // Skip if Supabase is not available - ADMIN HARUS ONLINE
-  if (!window.supabaseClient) {
-    console.error('❌ Supabase client not available. Admin must be online to fetch tasks.');
+  // OPTIMASI: Network health check
+  if (!window.supabaseClient || !window.supabaseHealthy) {
+    console.log('📊 Using localStorage for tasks (offline/unhealthy mode)');
     return;
+  }
+
+  // OPTIMASI: Check cache first - tapi force fetch untuk admin
+  const now = Date.now();
+  const isAdmin = this.currentUser?.role === 'admin';
+  
+  if(!isAdmin && this._cachedAllTasks && this._cacheTimestamp && (now - this._cacheTimestamp) < this._cacheTimeout){
+    console.log('⚡ Using cached tasks, skipping fetch (user mode)');
+    this.savedTasks = this._cachedAllTasks;
+    return;
+  }
+
+  // Admin selalu fetch fresh data
+  if(isAdmin){
+    console.log('👑 Admin user - force fetching fresh tasks from Supabase');
+    this.clearCache(); // Clear cache untuk admin
   }
 
   try {
     console.log('🚀 Fast fetching tasks from Supabase...');
     const startTime = performance.now();
     
-    // CARA CEPAT: Fetch tasks tanpa JOIN, lalu map nama user
+    // OPTIMASI: Production query dengan selective fields
     const { data: tasks, error: tasksError } = await window.supabaseClient
       .from('tasks')
-      .select('*')
+      .select('id, user_id, teknisi, gedung, ruangan, tanggal, waktu, pelapor, masalah, penyelesaian, status_pekerjaan, foto, created_at')
       .order('created_at', { ascending: false })
-      .limit(1000); // Batasi untuk performa
+      .limit(500); // Tambah limit untuk melihat semua tasks
 
     if(tasksError) {
       console.error('❌ Error fetching tasks:', tasksError);
+      window.supabaseHealthy = false;
       this.savedTasks = [];
       return;
     }
@@ -688,34 +841,67 @@ async fetchTasks(){
       return;
     }
 
-    // Map nama user dari registeredUsers (lebih cepat dari JOIN)
+    console.log('📝 Raw tasks from Supabase:', tasks.length);
+    console.log('📝 Raw tasks sample:', tasks.slice(0, 3).map(t => ({
+      id: t.id,
+      user_id: t.user_id,
+      teknisi: t.teknisi,
+      masalah: t.masalah,
+      status_pekerjaan: t.status_pekerjaan
+    })));
+
+    // OPTIMASI: Map nama user dengan caching dan field compatibility
+    console.log('👥 Available users for mapping:', this.registeredUsers.map(u => ({
+      id: u.id,
+      username: u.username,
+      name: u.name
+    })));
+
+    const userMap = new Map(this.registeredUsers.map(u => [u.id, u]));
     const formattedData = tasks.map(task => {
-      const user = this.registeredUsers.find(u => u.id === task.user_id);
+      const user = userMap.get(task.user_id);
+      
+      // DEBUG: Log mapping result
+      if (!user) {
+        console.warn('⚠️ No user found for task user_id:', task.user_id);
+      } else {
+        console.log('✅ User mapped:', {
+          taskUserId: task.user_id,
+          mappedUser: user.name,
+          taskMasalah: task.masalah
+        });
+      }
+      
       return {
         ...task,
         nama: user ? user.name : 'Unknown User',
-        username: user ? user.username : 'unknown'
+        username: user ? user.username : 'unknown',
+        // CRITICAL: Tambahkan field untuk compatibility dengan localStorage
+        statusPekerjaan: task.status_pekerjaan
       };
     });
 
     this.savedTasks = formattedData;
     localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
     
+    // OPTIMASI: Update cache
+    this._cachedAllTasks = formattedData;
+    this._cacheTimestamp = now;
+    
     const endTime = performance.now();
     console.log(`✅ Tasks fetched in ${(endTime - startTime).toFixed(2)}ms:`, formattedData.length);
-    console.log('📝 Task samples:', formattedData.slice(0, 3).map(t => ({
+    console.log('📝 Formatted tasks sample:', formattedData.slice(0, 3).map(t => ({
       id: t.id,
       user_id: t.user_id,
       nama: t.nama,
       status_pekerjaan: t.status_pekerjaan,
+      statusPekerjaan: t.statusPekerjaan,
       tanggal: t.tanggal
     })));
 
-    // Clear cache saat data berubah
-    this.clearCache();
-
   } catch (error) {
     console.error('❌ Critical error fetching tasks:', error);
+    window.supabaseHealthy = false;
     this.savedTasks = [];
   }
 },
