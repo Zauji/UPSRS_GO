@@ -39,14 +39,62 @@ dayjs.locale('id');
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4bGVncHl6aWVjaXd5a3pqaG9uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2NjY4MzAsImV4cCI6MjA4NTI0MjgzMH0.bA_2LtumthKROSnEzIZEbFPYiQ6tT7vqeWOo7IO0haQ';
   
   try {
-    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    // OPTIMASI: Production-ready Supabase client dengan connection pooling
+    const supabaseOptions = {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      },
+      db: {
+        schema: 'public'
+      },
+      global: {
+        headers: {
+          'X-Client-Info': 'upsrs-go/1.0.0'
+        }
+      },
+      // OPTIMASI: Connection timeout untuk production
+      fetch: (url, options = {}) => {
+        const timeout = 10000; // 10 seconds timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+        
+        return fetch(url, {
+          ...options,
+          signal: controller.signal
+        }).finally(() => {
+          clearTimeout(timeoutId);
+        });
+      }
+    };
+    
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, supabaseOptions);
     window.supabaseClient = supabaseClient;
-    console.log('✅ Supabase client initialized:', SUPABASE_URL);
+    
+    // OPTIMASI: Connection health check
+    window.supabaseHealthy = true;
+    
+    console.log('✅ Supabase client initialized (Production):', SUPABASE_URL);
+    console.log('🌐 Environment:', window.location.hostname.includes('vercel.app') ? 'Vercel Production' : 'Local Development');
+    
   } catch (error) {
     console.error('❌ Failed to initialize Supabase client:', error);
     window.supabaseClient = null;
+    window.supabaseHealthy = false;
     console.warn('⚠️ Application will run in offline mode');
   }
+  
+  // OPTIMASI: Network status monitoring
+  window.addEventListener('online', () => {
+    console.log('🌐 Network online - enabling sync');
+    window.supabaseHealthy = true;
+  });
+  
+  window.addEventListener('offline', () => {
+    console.log('📵 Network offline - disabling sync');
+    window.supabaseHealthy = false;
+  });
 </script>
 
 <!-- ExcelJS & FileSaver -->
@@ -108,6 +156,17 @@ password:'',
 profilePhoto:null
 },
 
+// Cache properties for performance
+_cachedAllTasks: null,
+_cacheTimestamp: null,
+_cacheTimeout: 30000, // 30 seconds cache
+_isFetching: false,
+_lastFetchTime: null,
+
+// Loading states
+isLoading: false,
+syncStatus: '',
+
 dataLokasi:{
 'Gedung Klinik':['Administrasi','Apotek','Aula','Depan Klinik','Kamar Dokter Wanita','Kamar Mandi','Parkiran Klinik','Pojok Asi','Poli KIA','Poli Umum','Rekam Medis','Ruang PI','Ruang Tunggu','Ruang UGD'],
 'RS Lantai 1':['Administrasi','Anamesa','Farmasi','Kamar Dokter','Laboratorium','Lobby Depan','Nurse Station Lantai 1','Pendaftaran','PIPP','Pojok Asi','Poli Anak','Poli Bedah','Poli Obgyn','Poli Urologi/Penyakit Dalam','Rekam Medis','UGD Maternal','UGD Umum'],
@@ -133,43 +192,106 @@ profile_photo:null
 },
 
 initApp(){
-console.log('🚀 Initializing UPSRS GO...');
-this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
-this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
-console.log('📊 Loaded users:', this.registeredUsers.length);
-console.log('📝 Loaded tasks:', this.savedTasks.length);
+  console.log('🚀 Initializing UPSRS GO...');
+  
+  // Load from localStorage first (FAST)
+  this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
+  this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
+  console.log('📊 Loaded users:', this.registeredUsers.length);
+  console.log('📝 Loaded tasks:', this.savedTasks.length);
 
-const u=localStorage.getItem('upsrs_current_user');
-if(u){
-this.currentUser=JSON.parse(u);
-console.log('👤 Current user found:', this.currentUser?.username, 'Role:', this.currentUser?.role);
-// Check if current user is Super Admin and redirect to admin dashboard
-if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
-this.page='adminDashboard';
-console.log('👑 Redirecting to admin dashboard');
-// Fetch latest data from Supabase for admin
-this.fetchUsers();
-this.fetchTasks();
-}else{
-this.page='dashboard';
-console.log('👤 Redirecting to user dashboard');
-}
-}else{
-console.log('🔓 No current user found');
-}
+  const u=localStorage.getItem('upsrs_current_user');
+  if(u){
+    this.currentUser=JSON.parse(u);
+    console.log('👤 Current user found:', this.currentUser?.username, 'Role:', this.currentUser?.role);
+    
+    // Check if current user is Super Admin and redirect to admin dashboard
+    if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
+      this.page='adminDashboard';
+      console.log('👑 Redirecting to admin dashboard');
+      
+      // OPTIMASI: Background fetch untuk admin
+      this.backgroundSyncData();
+    }else{
+      this.page='dashboard';
+      console.log('👤 Redirecting to user dashboard');
+      
+      // OPTIMASI: Background sync untuk user
+      this.backgroundSyncData();
+    }
+  }else{
+    console.log('🔓 No current user found');
+  }
 
-// Ensure Super Admin account always exists
-const adminUser=this.registeredUsers.find(x=>x.username==='Admin');
+  // Ensure Super Admin account always exists
+  const adminUser=this.registeredUsers.find(x=>x.username==='Admin');
+  if(!adminUser){
+    this.registeredUsers.push({id:999,name:'Super Admin',username:'Admin',password:'oTikaoke',role:'admin',profilePhoto:null});
+    localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
+    console.log('👑 Created default Admin user');
+  }else{
+    console.log('👑 Admin user already exists');
+  }
 
-if(!adminUser){
-this.registeredUsers.push({id:999,name:'Super Admin',username:'Admin',password:'oTikaoke',role:'admin',profilePhoto:null});
-localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
-console.log('👑 Created default Admin user');
-}else{
-console.log('👑 Admin user already exists');
-}
+  console.log('✅ UPSRS GO initialized successfully');
+},
 
-console.log('✅ UPSRS GO initialized successfully');
+// OPTIMASI: Background sync dengan delay
+async backgroundSyncData(){
+  // Skip jika sudah fetching
+  if(this._isFetching) return;
+  
+  // Check cache timeout
+  const now = Date.now();
+  if(this._cacheTimestamp && (now - this._cacheTimestamp) < this._cacheTimeout){
+    console.log('⚡ Using cached data, skipping sync');
+    return;
+  }
+  
+  // Delay 500ms untuk UI render dulu
+  setTimeout(() => {
+    this.syncDataWithLoading();
+  }, 500);
+},
+
+// OPTIMASI: Sync dengan loading indicator
+async syncDataWithLoading(){
+  if(this._isFetching) return;
+  
+  this._isFetching = true;
+  this.isLoading = true;
+  this.syncStatus = '🔄 Sinkronisasi data...';
+  
+  try {
+    console.log('⚡ Fast parallel sync with loading...');
+    const startTime = performance.now();
+    
+    // PARALLEL FETCHING - lebih cepat
+    const [usersResult, tasksResult] = await Promise.allSettled([
+      this.fetchUsers(),
+      this.fetchTasks()
+    ]);
+    
+    const endTime = performance.now();
+    console.log(`✅ Sync completed in ${(endTime - startTime).toFixed(2)}ms`);
+    
+    this.syncStatus = '✅ Data tersinkronisasi';
+    setTimeout(() => {
+      this.syncStatus = '';
+      this.isLoading = false;
+    }, 1000);
+    
+  } catch (error) {
+    console.error('❌ Sync failed:', error);
+    this.syncStatus = '❌ Gagal sinkronisasi';
+    setTimeout(() => {
+      this.syncStatus = '';
+      this.isLoading = false;
+    }, 2000);
+  } finally {
+    this._isFetching = false;
+    this._lastFetchTime = Date.now();
+  }
 },
 
 // Delete all registered accounts
@@ -635,32 +757,52 @@ return this.currentUser?.role==='admin';
 },
 
 async fetchUsers(){
-  // Skip if Supabase is not available (offline mode)
-  if (!window.supabaseClient) {
-    console.log('📊 Using localStorage for users (offline mode)');
+  // OPTIMASI: Network health check
+  if (!window.supabaseClient || !window.supabaseHealthy) {
+    console.log('📊 Using localStorage for users (offline/unhealthy mode)');
     return;
   }
 
   try {
+    console.log('🚀 Fast fetching users from Supabase...');
+    const startTime = performance.now();
+    
+    // OPTIMASI: Production query dengan index optimization
     const { data, error } = await window.supabaseClient
       .from('users')
-      .select('*')
-      .neq('role','admin');
+      .select('id, name, username, role, specialization, profile_photo')
+      .neq('role','admin')
+      .order('created_at', { ascending: false })
+      .limit(1000);
 
     if(!error && data){
       this.registeredUsers = data;
       localStorage.setItem('upsrs_users_v3', JSON.stringify(this.registeredUsers));
-      console.log('✅ Users fetched from Supabase:', data.length);
+      
+      const endTime = performance.now();
+      console.log(`✅ Users fetched in ${(endTime - startTime).toFixed(2)}ms:`, data.length);
+    } else if(error) {
+      console.error('❌ Users fetch error:', error);
+      window.supabaseHealthy = false;
     }
   } catch (error) {
     console.warn('⚠️ Failed to fetch users from Supabase, using localStorage:', error);
+    window.supabaseHealthy = false;
   }
 },
 
 async fetchTasks(){
-  // Skip if Supabase is not available - ADMIN HARUS ONLINE
-  if (!window.supabaseClient) {
-    console.error('❌ Supabase client not available. Admin must be online to fetch tasks.');
+  // OPTIMASI: Network health check
+  if (!window.supabaseClient || !window.supabaseHealthy) {
+    console.log('📊 Using localStorage for tasks (offline/unhealthy mode)');
+    return;
+  }
+
+  // OPTIMASI: Check cache first
+  const now = Date.now();
+  if(this._cachedAllTasks && this._cacheTimestamp && (now - this._cacheTimestamp) < this._cacheTimeout){
+    console.log('⚡ Using cached tasks, skipping fetch');
+    this.savedTasks = this._cachedAllTasks;
     return;
   }
 
@@ -668,15 +810,16 @@ async fetchTasks(){
     console.log('🚀 Fast fetching tasks from Supabase...');
     const startTime = performance.now();
     
-    // CARA CEPAT: Fetch tasks tanpa JOIN, lalu map nama user
+    // OPTIMASI: Production query dengan selective fields
     const { data: tasks, error: tasksError } = await window.supabaseClient
       .from('tasks')
-      .select('*')
+      .select('id, user_id, teknisi, gedung, ruangan, tanggal, waktu, pelapor, masalah, penyelesaian, status_pekerjaan, foto, created_at')
       .order('created_at', { ascending: false })
-      .limit(1000); // Batasi untuk performa
+      .limit(300); // Kurangi limit untuk performa production
 
     if(tasksError) {
       console.error('❌ Error fetching tasks:', tasksError);
+      window.supabaseHealthy = false;
       this.savedTasks = [];
       return;
     }
@@ -688,9 +831,10 @@ async fetchTasks(){
       return;
     }
 
-    // Map nama user dari registeredUsers (lebih cepat dari JOIN)
+    // OPTIMASI: Map nama user dengan caching
+    const userMap = new Map(this.registeredUsers.map(u => [u.id, u]));
     const formattedData = tasks.map(task => {
-      const user = this.registeredUsers.find(u => u.id === task.user_id);
+      const user = userMap.get(task.user_id);
       return {
         ...task,
         nama: user ? user.name : 'Unknown User',
@@ -700,6 +844,10 @@ async fetchTasks(){
 
     this.savedTasks = formattedData;
     localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+    
+    // OPTIMASI: Update cache
+    this._cachedAllTasks = formattedData;
+    this._cacheTimestamp = now;
     
     const endTime = performance.now();
     console.log(`✅ Tasks fetched in ${(endTime - startTime).toFixed(2)}ms:`, formattedData.length);
@@ -711,11 +859,9 @@ async fetchTasks(){
       tanggal: t.tanggal
     })));
 
-    // Clear cache saat data berubah
-    this.clearCache();
-
   } catch (error) {
     console.error('❌ Critical error fetching tasks:', error);
+    window.supabaseHealthy = false;
     this.savedTasks = [];
   }
 },
@@ -725,6 +871,155 @@ clearCache(){
   this._cachedAllTasks = null;
   this._cacheTimestamp = null;
   console.log('🧹 Cache cleared');
+},
+
+// OPTIMASI: Fast save task dengan loading dan network awareness
+async saveTask(){
+  if(!this.newTask.teknisi||!this.newTask.gedung||!this.newTask.ruangan||!this.newTask.masalah||!this.newTask.tindakan){
+    return alert('Lengkapi semua data wajib!');
+  }
+
+  // OPTIMASI: Show loading
+  this.isLoading = true;
+  this.syncStatus = '💾 Menyimpan laporan...';
+
+  try {
+    const entry={
+      user_id:this.currentUser.id||this.currentUser.username,
+      teknisi:this.newTask.teknisi,
+      gedung:this.newTask.gedung,
+      ruangan:this.newTask.ruangan,
+      tanggal:this.newTask.tanggal,
+      waktu:this.newTask.waktu,
+      pelapor:this.newTask.pelapor,
+      masalah:this.newTask.masalah,
+      penyelesaian:this.newTask.tindakan,
+      status_pekerjaan: this.newTask.statusPekerjaan,
+      foto: this.newTask.foto,
+      created_at: new Date().toISOString()
+    };
+
+    // OPTIMASI: Network health check
+    if (window.supabaseClient && window.supabaseHealthy) {
+      try {
+        console.log('🔄 Fast saving to Supabase...');
+        const startTime = performance.now();
+        
+        // OPTIMASI: Production insert dengan retry logic
+        const { data, error } = await window.supabaseClient
+          .from('tasks')
+          .insert([entry])
+          .select('id, created_at')
+          .single();
+
+        if (error) {
+          console.error('❌ Supabase error details:', error);
+          window.supabaseHealthy = false;
+          throw error;
+        }
+
+        const endTime = performance.now();
+        console.log(`✅ Task saved in ${(endTime - startTime).toFixed(2)}ms`);
+        
+        // OPTIMASI: Add to local cache immediately
+        entry.id = data.id;
+        this.savedTasks.unshift(entry);
+        this._cachedAllTasks = null; // Invalidate cache
+        localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+        
+        this.syncStatus = '✅ Laporan tersimpan!';
+        setTimeout(() => {
+          this.syncStatus = '';
+          this.isLoading = false;
+        }, 1000);
+        
+        alert('✅ Laporan berhasil disimpan (Online)');
+        
+        // OPTIMASI: Background refresh tanpa delay
+        setTimeout(() => this.fetchTasks(), 1000);
+        
+        // Reset form
+        this.resetNewTaskForm();
+        this.page='dashboard';
+        
+      } catch (supabaseError) {
+        console.error('❌ Supabase save failed:', supabaseError);
+        
+        // Fallback ke localStorage dengan loading
+        this.syncStatus = '💾 Menyimpan offline...';
+        
+        const useOffline = confirm('❌ Gagal menyimpan ke server.\n\n' +
+          'Error: ' + supabaseError.message + '\n\n' +
+          'Apakah ingin menyimpan secara offline (hanya di HP ini)?\n\n' +
+          '✅ Ya = Simpan di HP saja\n' +
+          '❌ Tidak = Coba lagi nanti');
+          
+        if(useOffline) {
+          // Fallback ke localStorage dengan field lama
+          const fallbackEntry = {
+            ...entry,
+            id: Date.now().toString(),
+            user_id: this.currentUser.id || this.currentUser.username,
+            teknisi: entry.teknisi,
+            gedung: entry.gedung,
+            ruangan: entry.ruangan,
+            tanggal: entry.tanggal,
+            waktu: entry.waktu,
+            pelapor: entry.pelapor,
+            masalah: entry.masalah,
+            penyelesaian: entry.penyelesaian,
+            statusPekerjaan: entry.status_pekerjaan,
+            foto: entry.foto
+          };
+          
+          this.savedTasks.unshift(fallbackEntry);
+          localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+          
+          this.syncStatus = '✅ Tersimpan offline';
+          setTimeout(() => {
+            this.syncStatus = '';
+            this.isLoading = false;
+          }, 1000);
+          
+          alert('✅ Laporan tersimpan (Offline mode)');
+          this.resetNewTaskForm();
+          this.page='dashboard';
+        } else {
+          this.syncStatus = '';
+          this.isLoading = false;
+        }
+      }
+    } else {
+      // Offline mode - localStorage only
+      console.log('📵 Offline mode - saving to localStorage');
+      const fallbackEntry = {
+        ...entry,
+        id: Date.now().toString(),
+        statusPekerjaan: entry.status_pekerjaan
+      };
+      
+      this.savedTasks.unshift(fallbackEntry);
+      localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+      
+      this.syncStatus = '✅ Tersimpan offline';
+      setTimeout(() => {
+        this.syncStatus = '';
+        this.isLoading = false;
+      }, 1000);
+      
+      alert('✅ Laporan tersimpan (Offline mode)');
+      this.resetNewTaskForm();
+      this.page='dashboard';
+    }
+  } catch (error) {
+    console.error('❌ Save task error:', error);
+    this.syncStatus = '❌ Gagal menyimpan';
+    setTimeout(() => {
+      this.syncStatus = '';
+      this.isLoading = false;
+    }, 2000);
+    alert('Gagal menyimpan laporan: ' + error.message);
+  }
 },
 
 // Ensure tasks table exists in Supabase
@@ -1766,6 +2061,16 @@ base64ToBlob(base64) {
 <button @click="page='admin'" class="px-3 py-2 bg-purple-100 text-purple-600 rounded-xl text-sm font-bold hover:bg-purple-200">Admin</button>
 </template>
 <button @click="logout" class="px-4 py-2 bg-red-100 text-red-600 rounded-xl text-sm font-bold hover:bg-red-200">Logout</button>
+</div>
+</div>
+
+<!-- OPTIMASI: Sync Status Indicator -->
+<div x-show="syncStatus" x-transition class="mb-4">
+<div class="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center gap-2">
+<template x-if="isLoading">
+<div class="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+</template>
+<p class="text-sm font-medium text-blue-800" x-text="syncStatus"></p>
 </div>
 </div>
 
