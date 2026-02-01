@@ -166,21 +166,55 @@ syncStatus: '',
 
 // 🟢 LANGKAH 2 — Sync dari Supabase
 async syncFromSupabase() {
-  if (!this.currentUser) return
+  if (!this.currentUser) return;
 
   console.log('🔄 Syncing tasks from Supabase for user:', this.currentUser.id);
   
-  const { data, error } = await window.supabaseClient
-    .from('tasks')
-    .select('*')
-    .eq('user_id', this.currentUser.id)
+  try {
+    // PERBAIKI: Query yang lebih sederhana untuk user
+    const { data, error } = await window.supabaseClient
+      .from('tasks')
+      .select('*') // Gunakan * untuk semua field
+      .eq('user_id', this.currentUser.id);
 
-  if (!error && data) {
-    this.savedTasks = data
-    localStorage.setItem('upsrs_tasks_v3', JSON.stringify(data))
-    console.log('✅ Tasks loaded from Supabase:', data.length)
-  } else {
-    console.warn('⚠️ Supabase gagal, pakai localStorage')
+    if (!error && data) {
+      this.savedTasks = data;
+      localStorage.setItem('upsrs_tasks_v3', JSON.stringify(data));
+      console.log('✅ Tasks loaded from Supabase:', data.length);
+    } else {
+      console.warn('⚠️ Supabase sync error:', error);
+      console.warn('⚠️ Supabase gagal, pakai localStorage');
+      
+      // PERBAIKI: Coba query yang lebih sederhana
+      const { data: simpleData, error: simpleError } = await window.supabaseClient
+        .from('tasks')
+        .select('id, user_id, created_at')
+        .eq('user_id', this.currentUser.id)
+        .limit(10);
+      
+      if(!simpleError && simpleData) {
+        console.log('✅ Simple sync worked, fetching details...');
+        const detailedTasks = [];
+        for(const task of simpleData) {
+          const { data: fullTask, error: fullError } = await window.supabaseClient
+            .from('tasks')
+            .select('*')
+            .eq('id', task.id)
+            .single();
+          
+          if(!fullError && fullTask) {
+            detailedTasks.push(fullTask);
+          }
+        }
+        
+        this.savedTasks = detailedTasks;
+        localStorage.setItem('upsrs_tasks_v3', JSON.stringify(detailedTasks));
+        console.log('✅ Tasks synced individually:', detailedTasks.length);
+      }
+    }
+  } catch (syncError) {
+    console.error('❌ Critical sync error:', syncError);
+    console.warn('⚠️ Sync failed, using localStorage data');
   }
 },
 
@@ -820,18 +854,54 @@ async fetchTasks(){
     console.log('🚀 Fast fetching tasks from Supabase...');
     const startTime = performance.now();
     
-    // OPTIMASI: Production query dengan selective fields
+    // PERBAIKI: Query yang lebih sederhana dan aman
     const { data: tasks, error: tasksError } = await window.supabaseClient
       .from('tasks')
-      .select('id, user_id, teknisi, gedung, ruangan, tanggal, waktu, pelapor, masalah, penyelesaian, status_pekerjaan, foto, created_at')
+      .select('*') // Gunakan * untuk semua field, lebih aman
       .order('created_at', { ascending: false })
-      .limit(500); // Tambah limit untuk melihat semua tasks
+      .limit(500);
 
     if(tasksError) {
       console.error('❌ Error fetching tasks:', tasksError);
-      window.supabaseHealthy = false;
-      this.savedTasks = [];
-      return;
+      console.error('❌ Error details:', {
+        message: tasksError.message,
+        details: tasksError.details,
+        hint: tasksError.hint,
+        code: tasksError.code
+      });
+      
+      // PERBAIKI: Jangan set unhealthy, coba query yang lebih sederhana
+      console.log('🔄 Trying simpler query...');
+      const { data: simpleTasks, error: simpleError } = await window.supabaseClient
+        .from('tasks')
+        .select('id, user_id, created_at')
+        .limit(10);
+      
+      if(simpleError) {
+        console.error('❌ Even simple query failed:', simpleError);
+        window.supabaseHealthy = false;
+        this.savedTasks = [];
+        return;
+      } else {
+        console.log('✅ Simple query worked, trying full data...');
+        // Fetch satu per satu dengan field yang ada
+        const detailedTasks = [];
+        for(const task of simpleTasks) {
+          const { data: fullTask, error: fullError } = await window.supabaseClient
+            .from('tasks')
+            .select('*')
+            .eq('id', task.id)
+            .single();
+          
+          if(!fullError && fullTask) {
+            detailedTasks.push(fullTask);
+          }
+        }
+        
+        console.log('✅ Fetched tasks individually:', detailedTasks.length);
+        this.processFetchedTasks(detailedTasks, startTime);
+        return;
+      }
     }
 
     if(!tasks || tasks.length === 0) {
@@ -842,68 +912,74 @@ async fetchTasks(){
     }
 
     console.log('📝 Raw tasks from Supabase:', tasks.length);
-    console.log('📝 Raw tasks sample:', tasks.slice(0, 3).map(t => ({
-      id: t.id,
-      user_id: t.user_id,
-      teknisi: t.teknisi,
-      masalah: t.masalah,
-      status_pekerjaan: t.status_pekerjaan
-    })));
-
-    // OPTIMASI: Map nama user dengan caching dan field compatibility
-    console.log('👥 Available users for mapping:', this.registeredUsers.map(u => ({
-      id: u.id,
-      username: u.username,
-      name: u.name
-    })));
-
-    const userMap = new Map(this.registeredUsers.map(u => [u.id, u]));
-    const formattedData = tasks.map(task => {
-      const user = userMap.get(task.user_id);
-      
-      // DEBUG: Log mapping result
-      if (!user) {
-        console.warn('⚠️ No user found for task user_id:', task.user_id);
-      } else {
-        console.log('✅ User mapped:', {
-          taskUserId: task.user_id,
-          mappedUser: user.name,
-          taskMasalah: task.masalah
-        });
-      }
-      
-      return {
-        ...task,
-        nama: user ? user.name : 'Unknown User',
-        username: user ? user.username : 'unknown',
-        // CRITICAL: Tambahkan field untuk compatibility dengan localStorage
-        statusPekerjaan: task.status_pekerjaan
-      };
-    });
-
-    this.savedTasks = formattedData;
-    localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
-    
-    // OPTIMASI: Update cache
-    this._cachedAllTasks = formattedData;
-    this._cacheTimestamp = now;
-    
-    const endTime = performance.now();
-    console.log(`✅ Tasks fetched in ${(endTime - startTime).toFixed(2)}ms:`, formattedData.length);
-    console.log('📝 Formatted tasks sample:', formattedData.slice(0, 3).map(t => ({
-      id: t.id,
-      user_id: t.user_id,
-      nama: t.nama,
-      status_pekerjaan: t.status_pekerjaan,
-      statusPekerjaan: t.statusPekerjaan,
-      tanggal: t.tanggal
-    })));
+    this.processFetchedTasks(tasks, startTime);
 
   } catch (error) {
     console.error('❌ Critical error fetching tasks:', error);
     window.supabaseHealthy = false;
     this.savedTasks = [];
   }
+},
+
+// PERBAIKI: Extract task processing untuk reuse
+processFetchedTasks(tasks, startTime) {
+  console.log('📝 Raw tasks sample:', tasks.slice(0, 3).map(t => ({
+    id: t.id,
+    user_id: t.user_id,
+    teknisi: t.teknisi,
+    masalah: t.masalah,
+    status_pekerjaan: t.status_pekerjaan
+  })));
+
+  // OPTIMASI: Map nama user dengan caching dan field compatibility
+  console.log('👥 Available users for mapping:', this.registeredUsers.map(u => ({
+    id: u.id,
+    username: u.username,
+    name: u.name
+  })));
+
+  const userMap = new Map(this.registeredUsers.map(u => [u.id, u]));
+  const formattedData = tasks.map(task => {
+    const user = userMap.get(task.user_id);
+    
+    // DEBUG: Log mapping result
+    if (!user) {
+      console.warn('⚠️ No user found for task user_id:', task.user_id);
+    } else {
+      console.log('✅ User mapped:', {
+        taskUserId: task.user_id,
+        mappedUser: user.name,
+        taskMasalah: task.masalah
+      });
+    }
+    
+    return {
+      ...task,
+      nama: user ? user.name : 'Unknown User',
+      username: user ? user.username : 'unknown',
+      // CRITICAL: Tambahkan field untuk compatibility dengan localStorage
+      statusPekerjaan: task.status_pekerjaan
+    };
+  });
+
+  this.savedTasks = formattedData;
+  localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+  
+  // OPTIMASI: Update cache
+  const now = Date.now();
+  this._cachedAllTasks = formattedData;
+  this._cacheTimestamp = now;
+  
+  const endTime = performance.now();
+  console.log(`✅ Tasks fetched in ${(endTime - startTime).toFixed(2)}ms:`, formattedData.length);
+  console.log('📝 Formatted tasks sample:', formattedData.slice(0, 3).map(t => ({
+    id: t.id,
+    user_id: t.user_id,
+    nama: t.nama,
+    status_pekerjaan: t.status_pekerjaan,
+    statusPekerjaan: t.statusPekerjaan,
+    tanggal: t.tanggal
+  })));
 },
 
 // Clear cache function
