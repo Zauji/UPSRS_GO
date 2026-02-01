@@ -33,6 +33,11 @@ dayjs.locale('id');
 
 <!-- Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<!-- ExcelJS -->
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+
 <script>
   // Simple Supabase client initialization
   const supabaseUrl = "https://zxlegpyzieciwykzjhon.supabase.co";
@@ -185,25 +190,84 @@ async syncFromSupabase() {
     const { data, error } = await query;
 
     if (!error && data) {
-      this.savedTasks = data;
-      
-      // PERBAIKI: Handle localStorage quota error
-      try {
-        localStorage.setItem('upsrs_tasks_v3', JSON.stringify(data));
-        console.log('💾 Tasks saved to localStorage successfully');
-      } catch (quotaError) {
-        if (quotaError.name === 'QuotaExceededError') {
-          console.warn('⚠️ localStorage quota exceeded, clearing old data...');
-          localStorage.removeItem('upsrs_tasks_v3');
-          try {
-            localStorage.setItem('upsrs_tasks_v3', JSON.stringify(data));
-            console.log('💾 Tasks saved after clearing old data');
-          } catch (retryError) {
-            console.error('❌ Still cannot save to localStorage, using memory only');
-          }
+      const formattedData = data.map(task => {
+        const formatted = {
+          id: task.id,
+          user_id: task.user_id,
+          nama: task.nama,
+          username: task.username,
+          tanggal: task.tanggal,
+          waktu: task.waktu,
+          gedung: task.gedung,
+          ruangan: task.ruangan,
+          pelapor: task.pelapor,
+          masalah: task.masalah,
+          penyelesaian: task.penyelesaian,
+          status_pekerjaan: task.status_pekerjaan,
+          statusPekerjaan: task.statusPekerjaan
+        };
+        // Hapus field foto untuk hemat space
+        if (task.foto && task.foto.length > 1000) {
+          formatted.foto = '[IMAGE_DATA]';
         } else {
-          console.error('❌ Error saving to localStorage:', quotaError);
+          formatted.foto = task.foto;
         }
+        return formatted;
+      });
+      this.savedTasks = formattedData;
+  
+  // PERBAIKI: Handle localStorage quota error dengan lebih baik
+  try {
+    localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+    console.log('💾 Tasks saved to localStorage successfully');
+  } catch (quotaError) {
+    if (quotaError.name === 'QuotaExceededError') {
+      console.warn('⚠️ localStorage quota exceeded, trying optimization...');
+      
+      // Coba kompres data dengan menghapus field yang tidak perlu
+      const compressedData = this.savedTasks.map(task => {
+        const compressed = {
+          id: task.id,
+          user_id: task.user_id,
+          nama: task.nama,
+          username: task.username,
+          tanggal: task.tanggal,
+          waktu: task.waktu,
+          gedung: task.gedung,
+          ruangan: task.ruangan,
+          pelapor: task.pelapor,
+          masalah: task.masalah,
+          penyelesaian: task.penyelesaian,
+          status_pekerjaan: task.status_pekerjaan,
+          statusPekerjaan: task.statusPekerjaan
+        };
+        // Hapus field foto untuk hemat space
+        if (task.foto && task.foto.length > 1000) {
+          compressed.foto = '[IMAGE_DATA]';
+        } else {
+          compressed.foto = task.foto;
+        }
+        return compressed;
+      });
+      
+      try {
+        localStorage.setItem('upsrs_tasks_v3', JSON.stringify(compressedData));
+        console.log('💾 Tasks saved with compression');
+      } catch (retryError) {
+        console.warn('⚠️ Still cannot save, clearing old data...');
+        localStorage.removeItem('upsrs_tasks_v3');
+        try {
+          localStorage.setItem('upsrs_tasks_v3', JSON.stringify(compressedData));
+          console.log('💾 Tasks saved after clearing old data');
+        } catch (finalError) {
+          console.error('❌ Cannot save to localStorage, using memory only');
+          // Continue tanpa localStorage - data stays in memory
+        }
+      }
+    } else {
+      console.error('❌ Error saving to localStorage:', quotaError);
+    }
+  }
       }
       
       console.log('✅ Tasks loaded from Supabase:', data.length);
@@ -417,6 +481,15 @@ try{
         masalah: t.masalah,
         status: t.status_pekerjaan
       }))
+    });
+    
+    // PERBAIKI: Log detail statistik
+    console.log('📈 Admin stats detail:', {
+      todayTasks: stats.todayTasks,
+      weeklyTasks: stats.weeklyTasks,
+      thisWeekCompleted: stats.thisWeekCompleted,
+      monthlyTasks: stats.monthlyTasks,
+      thisMonthCompleted: stats.thisMonthCompleted
     });
   }
   
@@ -1150,8 +1223,8 @@ cleanLocalStorage() {
     
     console.log('📊 localStorage usage:', (totalSize / 1024 / 1024).toFixed(2) + ' MB');
     
-    // If usage is high, clean old data
-    if (totalSize > 4 * 1024 * 1024) { // 4MB limit
+    // PERBAIKI: Lower threshold untuk mencegah error
+    if (totalSize > 2 * 1024 * 1024) { // 2MB limit
       console.log('🧹 Cleaning localStorage to free space...');
       
       // Keep only essential data
@@ -1174,6 +1247,8 @@ cleanLocalStorage() {
       });
       
       console.log('✅ localStorage cleaned, essential data restored');
+    } else {
+      console.log('✅ localStorage usage is OK');
     }
   } catch (error) {
     console.error('❌ Error cleaning localStorage:', error);
