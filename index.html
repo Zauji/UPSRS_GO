@@ -841,58 +841,113 @@ async handleRegister(){
     hasProfilePhoto: !!this.authProfilePhoto
   });
 
-  // Try Supabase first if available
-  if (window.supabaseClient) {
+  // PERBAIKI: Test koneksi Supabase sebelum registrasi
+  if (window.supabaseClient && window.supabaseHealthy) {
     try {
       console.log('📤 Attempting to register user to Supabase...');
       
+      // Test 1: Cek koneksi dasar
+      console.log('🔍 Testing basic connection...');
+      const { data: testData, error: testError } = await window.supabaseClient
+        .from('users')
+        .select('count')
+        .limit(1);
+      
+      if (testError) {
+        console.error('❌ Connection test failed:', testError);
+        throw new Error('Supabase connection failed: ' + testError.message);
+      }
+      
+      console.log('✅ Connection test passed');
+      
+      // Test 2: Cek apakah username sudah ada
+      console.log('🔍 Checking if username exists...');
+      const { data: existingUser, error: checkError } = await window.supabaseClient
+        .from('users')
+        .select('username')
+        .eq('username', this.authUsername)
+        .single();
+      
+      if (checkError && checkError.code !== 'PGRST116') {
+        console.error('❌ Username check failed:', checkError);
+      } else if (existingUser) {
+        console.warn('⚠️ Username already exists:', existingUser);
+        alert('Username sudah digunakan! Silakan pilih username lain.');
+        return;
+      }
+      
+      // Test 3: Registrasi user baru
+      console.log('📤 Inserting new user...');
+      const userData = {
+        name: this.authName,
+        username: this.authUsername,
+        password: this.authPassword,
+        role: 'user',
+        specialization: this.authSpecialization || '',
+        profile_photo: this.authProfilePhoto
+      };
+      
+      console.log('📊 User data to insert:', userData);
+      
       const { data, error } = await window.supabaseClient
         .from('users')
-        .insert([{
-          name: this.authName,
-          username: this.authUsername,
-          password: this.authPassword,
-          role: 'user',
-          specialization: this.authSpecialization || '',
-          profile_photo: this.authProfilePhoto
-        }])
+        .insert([userData])
         .select();
 
       console.log('🔍 DEBUG Supabase registration result:', {
         data: data,
         error: error?.message,
-        success: !error
+        success: !error,
+        errorCode: error?.code,
+        errorDetails: error?.details
       });
 
       if(error){
-        throw error;
+        console.error('❌ Registration error details:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        });
+        
+        // Coba fallback ke localStorage jika error spesifik
+        if (error.code === '42501' || error.message.includes('permission')) {
+          console.warn('⚠️ Permission denied, falling back to localStorage');
+        } else {
+          throw error;
+        }
+      } else {
+        console.log('✅ User registered successfully:', data);
+        alert('Daftar berhasil! Silakan login');
+        this.page='login';
+        this.authName='';
+        this.authUsername='';
+        this.authPassword='';
+        
+        // PERBAIKI: Refresh users list jika admin sedang login
+        if (this.currentUser?.role === 'admin') {
+          console.log('🔄 Refreshing users list after new registration...');
+          await this.fetchUsers();
+        }
+        
+        return;
       }
-
-      alert('Daftar berhasil! Silakan login');
-      this.page='login';
-      this.authName='';
-      this.authUsername='';
-      this.authPassword='';
-      
-      // PERBAIKI: Refresh users list jika admin sedang login
-      if (this.currentUser?.role === 'admin') {
-        console.log('🔄 Refreshing users list after new registration...');
-        await this.fetchUsers();
-      }
-      
-      return;
     } catch (supabaseError) {
       console.warn('❌ Supabase registration failed, using fallback:', supabaseError);
       console.error('❌ Supabase error details:', {
         message: supabaseError.message,
         details: supabaseError.details,
         hint: supabaseError.hint,
-        code: supabaseError.code
+        code: supabaseError.code,
+        stack: supabaseError.stack
       });
     }
+  } else {
+    console.warn('⚠️ Supabase not available or unhealthy, using localStorage fallback');
   }
 
   // Fallback to localStorage
+  console.log('💾 Using localStorage fallback...');
   const newUser = {
     id: Date.now(),
     name: this.authName,
@@ -903,14 +958,136 @@ async handleRegister(){
     profile_photo: this.authProfilePhoto
   };
 
+  console.log('📊 LocalStorage user data:', newUser);
+
   this.registeredUsers.push(newUser);
   localStorage.setItem('upsrs_users_v3', JSON.stringify(this.registeredUsers));
+
+  console.log('✅ User saved to localStorage:', this.registeredUsers.length);
 
   alert('Daftar berhasil! (Mode Offline) Silakan login');
   this.page='login';
   this.authName='';
   this.authUsername='';
   this.authPassword='';
+},
+
+// PERBAIKI: Fungsi test debug registration
+async testSupabaseRegistration() {
+  console.log('🔍 ===== DEBUG REGISTRATION TEST START =====');
+  
+  // Test 1: Cek Supabase connection
+  console.log('📊 Test 1: Checking Supabase connection...');
+  if (!window.supabaseClient) {
+    console.error('❌ Supabase client not initialized');
+    alert('❌ Supabase client not initialized');
+    return;
+  }
+  
+  if (!window.supabaseHealthy) {
+    console.error('❌ Supabase connection unhealthy');
+    alert('❌ Supabase connection unhealthy');
+    return;
+  }
+  
+  console.log('✅ Supabase client and connection healthy');
+  
+  // Test 2: Cek akses tabel users
+  console.log('📊 Test 2: Testing users table access...');
+  try {
+    const { data: testData, error: testError } = await window.supabaseClient
+      .from('users')
+      .select('count')
+      .limit(1);
+    
+    if (testError) {
+      console.error('❌ Users table access failed:', testError);
+      alert('❌ Users table access failed: ' + testError.message);
+      return;
+    }
+    
+    console.log('✅ Users table accessible');
+  } catch (error) {
+    console.error('❌ Users table test error:', error);
+    alert('❌ Users table test error: ' + error.message);
+    return;
+  }
+  
+  // Test 3: Cek data yang akan diinsert
+  console.log('📊 Test 3: Preparing test data...');
+  const testUser = {
+    name: 'Debug Test User',
+    username: 'debuguser' + Date.now(),
+    password: 'debug123',
+    role: 'user',
+    specialization: 'Debug Test',
+    profile_photo: null
+  };
+  
+  console.log('📊 Test user data:', testUser);
+  
+  // Test 4: Insert test user
+  console.log('📊 Test 4: Inserting test user...');
+  try {
+    const { data, error } = await window.supabaseClient
+      .from('users')
+      .insert([testUser])
+      .select();
+    
+    console.log('🔍 DEBUG Insert Result:', {
+      data: data,
+      error: error?.message,
+      success: !error,
+      errorCode: error?.code,
+      errorDetails: error?.details
+    });
+    
+    if (error) {
+      console.error('❌ Insert failed:', error);
+      console.error('❌ Full error details:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
+      
+      // Cek jenis error
+      if (error.code === '42501') {
+        alert('❌ Permission denied! RLS policy mungkin memblokir insert. Check Supabase RLS policies.');
+      } else if (error.code === '23505') {
+        alert('❌ Duplicate entry! Username sudah ada.');
+      } else if (error.code === 'PGRST116') {
+        alert('❌ Table tidak ditemukan! Pastikan tabel users ada di Supabase.');
+      } else {
+        alert('❌ Insert failed: ' + error.message + ' (Code: ' + error.code + ')');
+      }
+      return;
+    }
+    
+    console.log('✅ Test user inserted successfully:', data);
+    alert('✅ Test registration successful! User: ' + testUser.username);
+    
+    // Test 5: Verify insert
+    console.log('📊 Test 5: Verifying insert...');
+    const { data: verifyData, error: verifyError } = await window.supabaseClient
+      .from('users')
+      .select('*')
+      .eq('username', testUser.username)
+      .single();
+    
+    if (verifyError) {
+      console.error('❌ Verification failed:', verifyError);
+    } else {
+      console.log('✅ Verification successful:', verifyData);
+    }
+    
+  } catch (insertError) {
+    console.error('❌ Insert test error:', insertError);
+    alert('❌ Insert test error: ' + insertError.message);
+    return;
+  }
+  
+  console.log('🔍 ===== DEBUG REGISTRATION TEST END =====');
 },
 
 async handleAdminLogin(){
@@ -2694,6 +2871,7 @@ base64ToBlob(base64) {
 </label>
 </div>
 <button @click="handleRegister" class="w-full bg-blue-600 text-white py-4 rounded-xl font-bold hover:bg-blue-700 transition">DAFTAR</button>
+<button @click="testSupabaseRegistration" class="w-full bg-orange-500 text-white py-3 rounded-xl font-bold hover:bg-orange-600 transition mt-2">🔍 TEST DEBUG REGISTRATION</button>
 <button @click="page='adminLogin'" class="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 transition mt-2">MASUK SEBAGAI ADMIN</button>
 <button @click="page='login'" class="w-full text-xs text-slate-500 mt-3 hover:text-blue-600">Sudah punya akun? Login</button>
 </div>
