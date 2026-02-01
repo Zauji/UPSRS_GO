@@ -151,9 +151,10 @@ profile_photo:null
 // Cache properties for performance
 _cachedAllTasks: null,
 _cacheTimestamp: null,
-_cacheTimeout: 30000, // 30 seconds cache
+_cacheTimeout: 30000,
 _isFetching: false,
 _lastFetchTime: null,
+_lastDebugLog: 0, // PERBAIKI: Throttle debug logging
 
 // OPTIMASI: User cache properties
 _cachedUsers: null,
@@ -185,16 +186,38 @@ async syncFromSupabase() {
 
     if (!error && data) {
       this.savedTasks = data;
-      localStorage.setItem('upsrs_tasks_v3', JSON.stringify(data));
+      
+      // PERBAIKI: Handle localStorage quota error
+      try {
+        localStorage.setItem('upsrs_tasks_v3', JSON.stringify(data));
+        console.log('💾 Tasks saved to localStorage successfully');
+      } catch (quotaError) {
+        if (quotaError.name === 'QuotaExceededError') {
+          console.warn('⚠️ localStorage quota exceeded, clearing old data...');
+          localStorage.removeItem('upsrs_tasks_v3');
+          try {
+            localStorage.setItem('upsrs_tasks_v3', JSON.stringify(data));
+            console.log('💾 Tasks saved after clearing old data');
+          } catch (retryError) {
+            console.error('❌ Still cannot save to localStorage, using memory only');
+          }
+        } else {
+          console.error('❌ Error saving to localStorage:', quotaError);
+        }
+      }
+      
       console.log('✅ Tasks loaded from Supabase:', data.length);
       
-      // DEBUG: Log task samples
-      console.log('📝 Task samples:', data.slice(0, 3).map(t => ({
-        id: t.id,
-        user_id: t.user_id,
-        masalah: t.masalah,
-        status: t.status_pekerjaan
-      })));
+      // DEBUG: Log task samples (reduced frequency)
+      if(!this._lastDebugLog || Date.now() - this._lastDebugLog > 5000) {
+        console.log('📝 Task samples:', data.slice(0, 3).map(t => ({
+          id: t.id,
+          user_id: t.user_id,
+          masalah: t.masalah,
+          status: t.status_pekerjaan
+        })));
+        this._lastDebugLog = Date.now();
+      }
     } else {
       console.warn('⚠️ Supabase sync error:', error);
       console.warn('⚠️ Supabase gagal, pakai localStorage');
@@ -225,6 +248,9 @@ setupRealtimeSubscription() {
 
 initApp(){
   console.log('🚀 Initializing UPSRS GO...');
+  
+  // PERBAIKI: Clean localStorage untuk mengatasi quota issue
+  this.cleanLocalStorage();
   
   // OPTIMASI: Load localStorage data immediately
   const savedUsers = localStorage.getItem('upsrs_users_v3');
@@ -314,48 +340,30 @@ alert('Semua akun telah dihapus!');
 
 get filteredTasks(){
 try{
-console.log('🔍 DEBUG: Filtering tasks for user:', {
-  currentUser: this.currentUser,
-  userId: this.currentUser?.id,
-  username: this.currentUser?.username,
-  role: this.currentUser?.role,
-  totalSavedTasks: this.savedTasks.length
-});
+// PERBAIKI: Kurangi debug logging frequency
+if(!this._lastDebugLog || Date.now() - this._lastDebugLog > 5000) {
+  console.log('🔍 DEBUG: Filtering tasks for user:', {
+    currentUser: this.currentUser?.username,
+    userId: this.currentUser?.id,
+    role: this.currentUser?.role,
+    totalSavedTasks: this.savedTasks.length
+  });
+  this._lastDebugLog = Date.now();
+}
 
 // Return empty array if no current user
 if(!this.currentUser){
-console.log('❌ No current user found');
 return [];
 }
 
 // PERBAIKI: Admin melihat semua task tanpa filter
 if(this.currentUser?.role === 'admin'){
-console.log('👑 Admin user - showing ALL tasks without filtering');
 return this.savedTasks; // Admin lihat semua task
 }
 
 // PERBAIKI: Regular users hanya lihat task sendiri
 const currentUserId = this.currentUser.id || this.currentUser.username;
-console.log('👤 Regular user, filtering by user_id:', currentUserId);
-
-const userTasks = this.savedTasks.filter(task => {
-  const matches = task.user_id === currentUserId;
-  if (matches) {
-    console.log('✅ Found task for user:', {
-      taskId: task.id,
-      taskUserId: task.user_id,
-      currentUserId: currentUserId,
-      taskTitle: task.masalah
-    });
-  }
-  return matches;
-});
-
-console.log('📊 Filtered tasks result:', {
-  totalTasks: this.savedTasks.length,
-  userTasks: userTasks.length,
-  currentUserId: currentUserId
-});
+const userTasks = this.savedTasks.filter(task => task.user_id === currentUserId);
 
 if(this.filterPeriod==='all')return userTasks;
 
@@ -369,7 +377,6 @@ const filteredByPeriod = userTasks.filter(t=>{
   return false;
 });
 
-console.log('📅 Final filtered tasks by period:', filteredByPeriod.length);
 return filteredByPeriod;
 
 }catch(error){
@@ -1006,7 +1013,27 @@ processFetchedTasks(tasks, startTime) {
   });
 
   this.savedTasks = formattedData;
-  localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+  
+  // PERBAIKI: Handle localStorage quota error
+  try {
+    localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+    console.log('💾 Tasks saved to localStorage successfully');
+  } catch (quotaError) {
+    if (quotaError.name === 'QuotaExceededError') {
+      console.warn('⚠️ localStorage quota exceeded, clearing old data...');
+      // Clear old data and try again
+      localStorage.removeItem('upsrs_tasks_v3');
+      try {
+        localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+        console.log('💾 Tasks saved after clearing old data');
+      } catch (retryError) {
+        console.error('❌ Still cannot save to localStorage, using memory only');
+        // Continue without localStorage - data stays in memory
+      }
+    } else {
+      console.error('❌ Error saving to localStorage:', quotaError);
+    }
+  }
   
   // OPTIMASI: Update cache
   const now = Date.now();
@@ -1030,6 +1057,52 @@ clearCache(){
   this._cachedAllTasks = null;
   this._cacheTimestamp = null;
   console.log('🧹 Cache cleared');
+},
+
+// PERBAIKI: Clean localStorage untuk mengatasi quota issue
+cleanLocalStorage() {
+  try {
+    const keys = Object.keys(localStorage);
+    let totalSize = 0;
+    
+    // Calculate total size
+    keys.forEach(key => {
+      const value = localStorage.getItem(key);
+      if (value) {
+        totalSize += new Blob([value]).size;
+      }
+    });
+    
+    console.log('📊 localStorage usage:', (totalSize / 1024 / 1024).toFixed(2) + ' MB');
+    
+    // If usage is high, clean old data
+    if (totalSize > 4 * 1024 * 1024) { // 4MB limit
+      console.log('🧹 Cleaning localStorage to free space...');
+      
+      // Keep only essential data
+      const essentialKeys = ['upsrs_current_user', 'upsrs_users_v3'];
+      const essentialData = {};
+      
+      essentialKeys.forEach(key => {
+        const value = localStorage.getItem(key);
+        if (value) {
+          essentialData[key] = value;
+        }
+      });
+      
+      // Clear everything
+      localStorage.clear();
+      
+      // Restore essential data
+      Object.keys(essentialData).forEach(key => {
+        localStorage.setItem(key, essentialData[key]);
+      });
+      
+      console.log('✅ localStorage cleaned, essential data restored');
+    }
+  } catch (error) {
+    console.error('❌ Error cleaning localStorage:', error);
+  }
 },
 
 // Ensure tasks table exists in Supabase
