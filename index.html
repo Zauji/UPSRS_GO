@@ -55,13 +55,98 @@ dayjs.locale('id');
     console.log('✅ Supabase client initialized (Simple):', supabaseUrl);
     console.log('🌐 Environment:', window.location.hostname.includes('vercel.app') ? 'Vercel Production' : 'Local Development');
     
+    // PERBAIKI: Test connection ke Supabase
+    testSupabaseConnection();
+    
   } catch (error) {
     console.error('❌ Failed to initialize Supabase client:', error);
-    window.supabaseClient = null;
     window.supabaseHealthy = false;
     console.warn('⚠️ Application will run in offline mode');
   }
   
+  // PERBAIKI: Fungsi test koneksi
+  async function testSupabaseConnection() {
+    try {
+      console.log('🔍 Testing Supabase connection...');
+      
+      // Test 1: Cek akses ke users table
+      console.log('📊 Testing users table access...');
+      const { data: usersData, error: usersError } = await window.supabaseClient
+        .from('users')
+        .select('count')
+        .limit(1);
+      
+      if (usersError) {
+        console.error('❌ Users table access failed:', usersError);
+        console.error('❌ Users error details:', {
+          message: usersError.message,
+          details: usersError.details,
+          hint: usersError.hint,
+          code: usersError.code
+        });
+      } else {
+        console.log('✅ Users table accessible!');
+      }
+      
+      // Test 2: Cek akses ke tasks table
+      console.log('📊 Testing tasks table access...');
+      const { data: tasksData, error: tasksError } = await window.supabaseClient
+        .from('tasks')
+        .select('count')
+        .limit(1);
+      
+      if (tasksError) {
+        console.error('❌ Tasks table access failed:', tasksError);
+        console.error('❌ Tasks error details:', {
+          message: tasksError.message,
+          details: tasksError.details,
+          hint: tasksError.hint,
+          code: tasksError.code
+        });
+      } else {
+        console.log('✅ Tasks table accessible!');
+      }
+      
+      // Test 3: Cek struktur users table
+      console.log('🔍 Testing users table structure...');
+      const { data: usersStructure, error: structureError } = await window.supabaseClient
+        .from('users')
+        .select('*')
+        .limit(1);
+      
+      if (structureError) {
+        console.error('❌ Users table structure test failed:', structureError);
+      } else {
+        console.log('✅ Users table structure:', usersStructure);
+      }
+      
+      // Test 4: Cek jumlah data
+      console.log('📊 Checking existing data...');
+      const { data: existingUsers, error: countError } = await window.supabaseClient
+        .from('users')
+        .select('id, name, username, role')
+        .neq('role', 'admin');
+      
+      if (countError) {
+        console.error('❌ Count users failed:', countError);
+      } else {
+        console.log('📊 Existing users:', existingUsers?.length || 0);
+        console.log('👥 Sample users:', existingUsers?.slice(0, 3));
+      }
+      
+      if (usersError || tasksError) {
+        window.supabaseHealthy = false;
+        console.error('❌ Supabase connection test failed');
+      } else {
+        console.log('✅ Supabase connection test successful!');
+        window.supabaseHealthy = true;
+      }
+    } catch (testError) {
+      console.error('❌ Supabase connection test error:', testError);
+      window.supabaseHealthy = false;
+    }
+  }
+
   // OPTIMASI: Network status monitoring
   window.addEventListener('online', () => {
     console.log('🌐 Network online - enabling sync');
@@ -210,6 +295,14 @@ async syncFromSupabase() {
     const { data, error } = await query;
 
     if (!error && data) {
+      console.log('🔍 DEBUG syncFromSupabase:', {
+        currentUserRole: this.currentUser?.role,
+        currentUserID: this.currentUser?.id,
+        dataLength: data.length,
+        isAdmin: this.currentUser?.role === 'admin',
+        sampleData: data.slice(0, 2)
+      });
+      
       const formattedData = data.map(task => {
         const formatted = {
           id: task.id,
@@ -241,6 +334,13 @@ async syncFromSupabase() {
       } else {
         this.savedTasks = [...this.savedTasks, ...formattedData];
       }
+      
+      console.log('🔍 DEBUG after saving to savedTasks:', {
+        savedTasksLength: this.savedTasks.length,
+        currentPage: this._currentPage,
+        isAdmin: this.currentUser?.role === 'admin',
+        sampleSavedTasks: this.savedTasks.slice(0, 2)
+      });
       
       // OPTIMASI: Check if more data available
       this._hasMoreTasks = data.length === this._pageSize;
@@ -539,10 +639,23 @@ initApp(){
   // OPTIMASI: Background sync dengan delay untuk UI responsiveness
   if(window.supabaseClient && this.currentUser){
     console.log('🔄 Starting background sync...');
+    console.log('🔍 DEBUG initApp:', {
+      currentUser: this.currentUser?.username,
+      userRole: this.currentUser?.role,
+      isAdmin: this.currentUser?.role === 'admin',
+      savedTasksLength: this.savedTasks.length
+    });
+    
     // Load users first, then tasks
     setTimeout(async () => {
+      console.log('⏰ Starting delayed sync...');
       await this.fetchUsers();
       await this.fetchTasks();
+      
+      console.log('🔍 DEBUG after fetchTasks:', {
+        savedTasksLength: this.savedTasks.length,
+        isAdmin: this.currentUser?.role === 'admin'
+      });
       
       // OPTIMASI: Prefetch data untuk faster navigation
       if (this.currentUser?.role === 'admin') {
@@ -721,10 +834,19 @@ async handleRegister(){
   if(!this.authName || !this.authUsername || !this.authPassword)
     return alert('Lengkapi data!');
 
+  console.log('🔍 DEBUG handleRegister:', {
+    name: this.authName,
+    username: this.authUsername,
+    specialization: this.authSpecialization,
+    hasProfilePhoto: !!this.authProfilePhoto
+  });
+
   // Try Supabase first if available
   if (window.supabaseClient) {
     try {
-      const { error } = await window.supabaseClient
+      console.log('📤 Attempting to register user to Supabase...');
+      
+      const { data, error } = await window.supabaseClient
         .from('users')
         .insert([{
           name: this.authName,
@@ -733,7 +855,14 @@ async handleRegister(){
           role: 'user',
           specialization: this.authSpecialization || '',
           profile_photo: this.authProfilePhoto
-        }]);
+        }])
+        .select();
+
+      console.log('🔍 DEBUG Supabase registration result:', {
+        data: data,
+        error: error?.message,
+        success: !error
+      });
 
       if(error){
         throw error;
@@ -744,9 +873,22 @@ async handleRegister(){
       this.authName='';
       this.authUsername='';
       this.authPassword='';
+      
+      // PERBAIKI: Refresh users list jika admin sedang login
+      if (this.currentUser?.role === 'admin') {
+        console.log('🔄 Refreshing users list after new registration...');
+        await this.fetchUsers();
+      }
+      
       return;
     } catch (supabaseError) {
-      console.warn('Supabase registration failed, using fallback:', supabaseError);
+      console.warn('❌ Supabase registration failed, using fallback:', supabaseError);
+      console.error('❌ Supabase error details:', {
+        message: supabaseError.message,
+        details: supabaseError.details,
+        hint: supabaseError.hint,
+        code: supabaseError.code
+      });
     }
   }
 
@@ -1150,19 +1292,46 @@ async fetchUsers(){
     return;
   }
 
+  console.log('🔍 DEBUG fetchUsers:', {
+    currentUser: this.currentUser?.username,
+    userRole: this.currentUser?.role,
+    isAdmin: this.currentUser?.role === 'admin'
+  });
+
   try {
+    console.log('📤 Fetching users from Supabase...');
+    
     const { data, error } = await window.supabaseClient
       .from('users')
       .select('*')
       .neq('role','admin');
 
+    console.log('🔍 DEBUG fetchUsers result:', {
+      dataLength: data?.length || 0,
+      error: error?.message,
+      success: !error,
+      sampleData: data?.slice(0, 3)
+    });
+
     if(!error && data){
       this.registeredUsers = data;
       localStorage.setItem('upsrs_users_v3', JSON.stringify(this.registeredUsers));
       console.log('✅ Users fetched from Supabase:', data.length);
+      console.log('📊 Updated registeredUsers:', this.registeredUsers.map(u => ({
+        id: u.id,
+        name: u.name,
+        username: u.username,
+        role: u.role
+      })));
+    } else {
+      console.error('❌ Error fetching users:', error);
     }
   } catch (error) {
     console.warn('⚠️ Failed to fetch users from Supabase, using localStorage:', error);
+    console.error('❌ Fetch users error details:', {
+      message: error.message,
+      stack: error.stack
+    });
   }
 },
 
@@ -1206,6 +1375,14 @@ async fetchTasks(){
     }
     
     const { data: tasks, error: tasksError } = await query;
+
+    console.log('🔍 DEBUG fetchTasks:', {
+      isAdmin: isAdmin,
+      currentUserID: this.currentUser?.id,
+      dataLength: tasks?.length || 0,
+      error: tasksError?.message,
+      sampleData: tasks?.slice(0, 2)
+    });
 
     if(tasksError) {
       console.error('❌ Error fetching tasks:', tasksError);
@@ -1322,6 +1499,14 @@ processFetchedTasks(tasks, startTime) {
   });
 
   this.savedTasks = formattedData;
+  
+  console.log('🔍 DEBUG processFetchedTasks:', {
+    savedTasksLength: this.savedTasks.length,
+    currentUserRole: this.currentUser?.role,
+    isAdmin: this.currentUser?.role === 'admin',
+    sampleSavedTasks: this.savedTasks.slice(0, 2),
+    allTaskUserIds: [...new Set(this.savedTasks.map(t => t.user_id))]
+  });
   
   // PERBAIKI: Handle localStorage quota error
   try {
@@ -1543,15 +1728,12 @@ try{
   const allTasks = this.savedTasks; // Admin sudah lihat semua task
   const now = dayjs();
   
-  console.log('📊 Calculating admin stats from savedTasks:', {
-    totalTasks: allTasks.length,
-    sampleTasks: allTasks.slice(0, 3).map(t => ({
-      id: t.id,
-      user_id: t.user_id,
-      masalah: t.masalah,
-      status: t.status_pekerjaan,
-      tanggal: t.tanggal
-    }))
+  // DEBUG: Log untuk memeriksa data
+  console.log('🔍 DEBUG adminStats:', {
+    savedTasksLength: allTasks.length,
+    sampleData: allTasks.slice(0, 2),
+    currentUser: this.currentUser?.username,
+    isAdmin: this.currentUser?.role === 'admin'
   });
   
   const stats = {
@@ -1562,7 +1744,7 @@ try{
     thisMonthCompleted: allTasks.filter(t=>t.status_pekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length
   };
   
-  console.log('📊 Admin statistics calculated:', stats);
+  console.log('📊 Final admin stats:', stats);
   return stats;
   
 }catch(error){
@@ -2898,6 +3080,23 @@ Share WhatsApp
 </div>
 </div>
 
+<!-- Data User -->
+<div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100 mb-6">
+<div class="flex items-center justify-between mb-4">
+<h3 class="text-lg font-black text-slate-800">Data User Terdaftar</h3>
+<div class="flex gap-2">
+<button @click="fetchUsers()" class="px-3 py-1 bg-green-100 text-green-600 rounded-lg text-xs font-bold hover:bg-green-200 transition">
+🔄 Refresh Users
+</button>
+<button @click="page='admin'" class="px-3 py-1 bg-purple-100 text-purple-600 rounded-lg text-xs font-bold hover:bg-purple-200 transition">
+➕ Tambah User
+</button>
+</div>
+</div>
+<div class="mb-4">
+<p class="text-sm text-slate-500">Total User: <span x-text="regularUsers.length" class="font-bold text-blue-600"></span></p>
+</div>
+
 <!-- Data Statistik -->
 <div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100 mb-6">
 <div class="flex items-center justify-between mb-4">
@@ -3340,3 +3539,4 @@ Share WhatsApp
 </div>
 </body>
 </html>
+
