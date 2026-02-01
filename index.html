@@ -168,49 +168,36 @@ syncStatus: '',
 async syncFromSupabase() {
   if (!this.currentUser) return;
 
-  console.log('🔄 Syncing tasks from Supabase for user:', this.currentUser.id);
+  console.log('🔄 Syncing tasks from Supabase for user:', this.currentUser.id, this.currentUser.username);
   
   try {
-    // PERBAIKI: Query yang lebih sederhana untuk user
-    const { data, error } = await window.supabaseClient
+    // PERBAIKI: Admin sync semua task, user sync task sendiri
+    let query = window.supabaseClient
       .from('tasks')
-      .select('*') // Gunakan * untuk semua field
-      .eq('user_id', this.currentUser.id);
+      .select('*');
+    
+    // Jika admin, ambil semua task. Jika user, ambil task user saja
+    if (this.currentUser.role !== 'admin') {
+      query = query.eq('user_id', this.currentUser.id);
+    }
+    
+    const { data, error } = await query;
 
     if (!error && data) {
       this.savedTasks = data;
       localStorage.setItem('upsrs_tasks_v3', JSON.stringify(data));
       console.log('✅ Tasks loaded from Supabase:', data.length);
+      
+      // DEBUG: Log task samples
+      console.log('📝 Task samples:', data.slice(0, 3).map(t => ({
+        id: t.id,
+        user_id: t.user_id,
+        masalah: t.masalah,
+        status: t.status_pekerjaan
+      })));
     } else {
       console.warn('⚠️ Supabase sync error:', error);
       console.warn('⚠️ Supabase gagal, pakai localStorage');
-      
-      // PERBAIKI: Coba query yang lebih sederhana
-      const { data: simpleData, error: simpleError } = await window.supabaseClient
-        .from('tasks')
-        .select('id, user_id, created_at')
-        .eq('user_id', this.currentUser.id)
-        .limit(10);
-      
-      if(!simpleError && simpleData) {
-        console.log('✅ Simple sync worked, fetching details...');
-        const detailedTasks = [];
-        for(const task of simpleData) {
-          const { data: fullTask, error: fullError } = await window.supabaseClient
-            .from('tasks')
-            .select('*')
-            .eq('id', task.id)
-            .single();
-          
-          if(!fullError && fullTask) {
-            detailedTasks.push(fullTask);
-          }
-        }
-        
-        this.savedTasks = detailedTasks;
-        localStorage.setItem('upsrs_tasks_v3', JSON.stringify(detailedTasks));
-        console.log('✅ Tasks synced individually:', detailedTasks.length);
-      }
     }
   } catch (syncError) {
     console.error('❌ Critical sync error:', syncError);
@@ -327,28 +314,64 @@ alert('Semua akun telah dihapus!');
 
 get filteredTasks(){
 try{
+console.log('🔍 DEBUG: Filtering tasks for user:', {
+  currentUser: this.currentUser,
+  userId: this.currentUser?.id,
+  username: this.currentUser?.username,
+  role: this.currentUser?.role,
+  totalSavedTasks: this.savedTasks.length
+});
+
 // Return empty array if no current user
 if(!this.currentUser){
+console.log('❌ No current user found');
 return [];
 }
 
-// Super Admin can see all tasks, regular users only see their own
-if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
-return this.getAllUserTasks();
+// PERBAIKI: Admin melihat semua task tanpa filter
+if(this.currentUser?.role === 'admin'){
+console.log('👑 Admin user - showing ALL tasks without filtering');
+return this.savedTasks; // Admin lihat semua task
 }
-// Regular users only see their own tasks
+
+// PERBAIKI: Regular users hanya lihat task sendiri
 const currentUserId = this.currentUser.id || this.currentUser.username;
-if(this.filterPeriod==='all')return this.savedTasks.filter(t=>t.user_id===currentUserId);
-const now=dayjs();
-return this.savedTasks.filter(t=>{
-const d=dayjs(t.tanggal,'DD/MM/YYYY');
-if(!d.isValid())return false;
-if(t.user_id!==currentUserId)return false; // Only user's own tasks
-if(this.filterPeriod==='today')return d.isSame(now,'day');
-if(this.filterPeriod==='week')return d.isAfter(now.subtract(7,'day'));
-if(this.filterPeriod==='month')return d.isSame(now,'month');
-return false;
+console.log('👤 Regular user, filtering by user_id:', currentUserId);
+
+const userTasks = this.savedTasks.filter(task => {
+  const matches = task.user_id === currentUserId;
+  if (matches) {
+    console.log('✅ Found task for user:', {
+      taskId: task.id,
+      taskUserId: task.user_id,
+      currentUserId: currentUserId,
+      taskTitle: task.masalah
+    });
+  }
+  return matches;
 });
+
+console.log('📊 Filtered tasks result:', {
+  totalTasks: this.savedTasks.length,
+  userTasks: userTasks.length,
+  currentUserId: currentUserId
+});
+
+if(this.filterPeriod==='all')return userTasks;
+
+const now=dayjs();
+const filteredByPeriod = userTasks.filter(t=>{
+  const d=dayjs(t.tanggal,'DD/MM/YYYY');
+  if(!d.isValid())return false;
+  if(this.filterPeriod==='today')return d.isSame(now,'day');
+  if(this.filterPeriod==='week')return d.isAfter(now.subtract(7,'day'));
+  if(this.filterPeriod==='month')return d.isSame(now,'month');
+  return false;
+});
+
+console.log('📅 Final filtered tasks by period:', filteredByPeriod.length);
+return filteredByPeriod;
+
 }catch(error){
 console.error('❌ Error in filteredTasks:', error);
 return [];
@@ -854,12 +877,19 @@ async fetchTasks(){
     console.log('🚀 Fast fetching tasks from Supabase...');
     const startTime = performance.now();
     
-    // PERBAIKI: Query yang lebih sederhana dan aman
-    const { data: tasks, error: tasksError } = await window.supabaseClient
+    // PERBAIKI: Admin ambil semua task, user ambil task sendiri
+    let query = window.supabaseClient
       .from('tasks')
-      .select('*') // Gunakan * untuk semua field, lebih aman
+      .select('*')
       .order('created_at', { ascending: false })
       .limit(500);
+    
+    // Jika bukan admin, filter by user_id
+    if(!isAdmin) {
+      query = query.eq('user_id', this.currentUser.id);
+    }
+    
+    const { data: tasks, error: tasksError } = await query;
 
     if(tasksError) {
       console.error('❌ Error fetching tasks:', tasksError);
@@ -872,10 +902,16 @@ async fetchTasks(){
       
       // PERBAIKI: Jangan set unhealthy, coba query yang lebih sederhana
       console.log('🔄 Trying simpler query...');
-      const { data: simpleTasks, error: simpleError } = await window.supabaseClient
+      const simpleQuery = window.supabaseClient
         .from('tasks')
         .select('id, user_id, created_at')
         .limit(10);
+      
+      if(!isAdmin) {
+        simpleQuery.eq('user_id', this.currentUser.id);
+      }
+      
+      const { data: simpleTasks, error: simpleError } = await simpleQuery;
       
       if(simpleError) {
         console.error('❌ Even simple query failed:', simpleError);
@@ -912,6 +948,13 @@ async fetchTasks(){
     }
 
     console.log('📝 Raw tasks from Supabase:', tasks.length);
+    console.log('📝 Raw tasks sample:', tasks.slice(0, 3).map(t => ({
+      id: t.id,
+      user_id: t.user_id,
+      masalah: t.masalah,
+      status_pekerjaan: t.status_pekerjaan
+    })));
+    
     this.processFetchedTasks(tasks, startTime);
 
   } catch (error) {
