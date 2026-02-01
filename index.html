@@ -161,6 +161,15 @@ _isFetching: false,
 _lastFetchTime: null,
 _lastDebugLog: 0, // PERBAIKI: Throttle debug logging
 
+// OPTIMASI LANJUTAN: Pagination & Lazy Loading
+_currentPage: 1,
+_pageSize: 50,
+_totalPages: 1,
+_hasMoreTasks: true,
+_prefetchCache: new Map(), // Prefetch next page
+_quickSyncEnabled: true, // Quick sync for recent changes
+_lastSyncTime: 0, // Track last sync time
+
 // OPTIMASI: User cache properties
 _cachedUsers: null,
 _usersCacheTimestamp: null,
@@ -170,18 +179,29 @@ _usersCacheTimeout: 60000, // 1 minute cache for users
 isLoading: false,
 syncStatus: '',
 
-// 🟢 LANGKAH 2 — Sync dari Supabase
+// 🟢 LANGKAH 2 — Sync dari Supabase (OPTIMIZED)
 async syncFromSupabase() {
   if (!this.currentUser) return;
 
   console.log('🔄 Syncing tasks from Supabase for user:', this.currentUser.id, this.currentUser.username);
   
   try {
-    // PERBAIKI: Admin sync semua task, user sync task sendiri
+    // OPTIMASI: Quick sync untuk perubahan terakhir
+    if (this._quickSyncEnabled && this._lastSyncTime > 0) {
+      const timeDiff = Date.now() - this._lastSyncTime;
+      if (timeDiff < 60000) { // 1 menit
+        console.log('⚡ Using quick sync - last sync was recent');
+        return;
+      }
+    }
+    
+    // OPTIMASI: Admin sync semua task, user sync task sendiri
     let query = window.supabaseClient
       .from('tasks')
-      .select('*');
-    
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(this._pageSize); // OPTIMASI: Pagination
+
     // Jika admin, ambil semua task. Jika user, ambil task user saja
     if (this.currentUser.role !== 'admin') {
       query = query.eq('user_id', this.currentUser.id);
@@ -214,7 +234,22 @@ async syncFromSupabase() {
         }
         return formatted;
       });
-      this.savedTasks = formattedData;
+      
+      // OPTIMASI: Append to existing data untuk pagination
+      if (this._currentPage === 1) {
+        this.savedTasks = formattedData;
+      } else {
+        this.savedTasks = [...this.savedTasks, ...formattedData];
+      }
+      
+      // OPTIMASI: Check if more data available
+      this._hasMoreTasks = data.length === this._pageSize;
+      this._totalPages = Math.ceil(this.savedTasks.length / this._pageSize);
+      
+      // OPTIMASI: Prefetch next page
+      if (this._hasMoreTasks) {
+        this.prefetchNextPage();
+      }
       
       // PERBAIKI: Handle localStorage quota error dengan lebih baik
       try {
@@ -269,6 +304,9 @@ async syncFromSupabase() {
         }
       }
       
+      // OPTIMASI: Update last sync time
+      this._lastSyncTime = Date.now();
+      
       console.log('✅ Tasks loaded from Supabase:', data.length);
       
       // DEBUG: Log task samples (reduced frequency)
@@ -291,22 +329,138 @@ async syncFromSupabase() {
   }
 },
 
-// 🟢 LANGKAH 5 — Setup realtime subscription
+// OPTIMASI: Prefetch next page untuk faster loading
+async prefetchNextPage() {
+  if (!this._hasMoreTasks || this._prefetchCache.has(this._currentPage + 1)) {
+    return;
+  }
+  
+  try {
+    const nextPage = this._currentPage + 1;
+    let query = window.supabaseClient
+      .from('tasks')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .range((nextPage - 1) * this._pageSize, nextPage * this._pageSize - 1);
+    
+    if (this.currentUser.role !== 'admin') {
+      query = query.eq('user_id', this.currentUser.id);
+    }
+    
+    const { data } = await query;
+    if (data && data.length > 0) {
+      this._prefetchCache.set(nextPage, data);
+      console.log(`⚡ Prefetched page ${nextPage} with ${data.length} tasks`);
+    }
+  } catch (error) {
+    console.warn('⚠️ Prefetch failed:', error);
+  }
+},
+
+// OPTIMASI: Quick sync untuk perubahan terbaru
+async quickSync() {
+  if (!this.currentUser || !this._quickSyncEnabled) return;
+  
+  try {
+    const lastSyncTime = new Date(this._lastSyncTime).toISOString();
+    let query = window.supabaseClient
+      .from('tasks')
+      .select('*')
+      .gte('updated_at', lastSyncTime)
+      .order('updated_at', { ascending: false });
+    
+    if (this.currentUser.role !== 'admin') {
+      query = query.eq('user_id', this.currentUser.id);
+    }
+    
+    const { data } = await query;
+    if (data && data.length > 0) {
+      console.log(`⚡ Quick sync found ${data.length} updated tasks`);
+      
+      // Update existing tasks dengan data terbaru
+      data.forEach(updatedTask => {
+        const index = this.savedTasks.findIndex(t => t.id === updatedTask.id);
+        if (index !== -1) {
+          this.savedTasks[index] = { ...this.savedTasks[index], ...updatedTask };
+        } else {
+          this.savedTasks.unshift(updatedTask);
+        }
+      });
+      
+      this._lastSyncTime = Date.now();
+      this.clearCache();
+    }
+  } catch (error) {
+    console.warn('⚠️ Quick sync failed:', error);
+  }
+},
+
+// 🟢 LANGKAH 5 — Setup realtime subscription (OPTIMIZED)
 setupRealtimeSubscription() {
   if (!window.supabaseClient || !this.currentUser) return;
   
   console.log('🔄 Setting up realtime subscription...');
-  window.supabaseClient
+  
+  // OPTIMASI: Disconnect existing subscription
+  if (this._realtimeChannel) {
+    this._realtimeChannel.unsubscribe();
+  }
+  
+  this._realtimeChannel = window.supabaseClient
     .channel('tasks-realtime')
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'tasks' },
-      () => {
-        console.log('📡 Realtime update received, syncing...');
-        this.syncFromSupabase();
+      (payload) => {
+        console.log('📡 Realtime update received:', payload.eventType);
+        
+        // OPTIMASI: Quick update tanpa full sync
+        if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+          const newTask = payload.new;
+          const index = this.savedTasks.findIndex(t => t.id === newTask.id);
+          
+          if (index !== -1) {
+            this.savedTasks[index] = { ...this.savedTasks[index], ...newTask };
+          } else {
+            this.savedTasks.unshift(newTask);
+          }
+          
+          this.clearCache();
+          console.log('⚡ Realtime quick update completed');
+        } else if (payload.eventType === 'DELETE') {
+          const deletedId = payload.old.id;
+          this.savedTasks = this.savedTasks.filter(t => t.id !== deletedId);
+          this.clearCache();
+          console.log('⚡ Realtime delete completed');
+        }
       }
     )
-    .subscribe();
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('✅ Realtime subscription active');
+      } else if (status === 'CHANNEL_ERROR') {
+        console.warn('⚠️ Realtime subscription error, retrying...');
+        setTimeout(() => this.setupRealtimeSubscription(), 5000);
+      }
+    });
+},
+
+// OPTIMASI: Background sync dengan debouncing
+startBackgroundSync() {
+  if (this._syncInterval) {
+    clearInterval(this._syncInterval);
+  }
+  
+  // OPTIMASI: Sync lebih sering untuk admin, lebih jarang untuk user
+  const syncInterval = this.currentUser?.role === 'admin' ? 30000 : 60000; // 30s vs 60s
+  
+  this._syncInterval = setInterval(() => {
+    if (this._quickSyncEnabled) {
+      this.quickSync();
+    }
+  }, syncInterval);
+  
+  console.log(`⚡ Background sync started (${syncInterval/1000}s interval)`);
 },
 
 initApp(){
@@ -377,6 +531,9 @@ initApp(){
   // 🟢 LANGKAH 5 — Realtime subscription (opsional)
   if(window.supabaseClient && this.currentUser){
     this.setupRealtimeSubscription();
+    
+    // OPTIMASI: Start background sync
+    this.startBackgroundSync();
   }
 
   // OPTIMASI: Background sync dengan delay untuk UI responsiveness
@@ -386,6 +543,11 @@ initApp(){
     setTimeout(async () => {
       await this.fetchUsers();
       await this.fetchTasks();
+      
+      // OPTIMASI: Prefetch data untuk faster navigation
+      if (this.currentUser?.role === 'admin') {
+        this.prefetchNextPage();
+      }
     }, 500);
   }
 },
@@ -1265,6 +1427,12 @@ forceRefreshStats() {
   if(this.currentUser?.role === 'admin') {
     this.syncFromSupabase().then(() => {
       console.log('📊 Admin stats after force refresh:', this.stats);
+      console.log('📊 Admin detailed stats after refresh:', this.adminStats);
+      
+      // Debug statistik detail
+      console.log('📊 Daily stats per user:', this.getDailyStatsPerUser());
+      console.log('📊 Weekly stats per user:', this.getWeeklyStatsPerUser());
+      console.log('📊 Monthly stats per user:', this.getMonthlyStatsPerUser());
     });
   }
 },
@@ -1410,15 +1578,16 @@ thisMonthCompleted:0
 },
 
 getAdminStats(){
-const allTasks=this.getAllUserTasks();
-const now=dayjs();
+// PERBAIKI: Gunakan savedTasks langsung untuk sinkronisasi yang benar
+const allTasks = this.savedTasks; // Admin sudah lihat semua task
+const now = dayjs();
 return{
-totalTasks:allTasks.length,
-totalUsers:this.regularUsers.length,
-completedTasks:allTasks.filter(t=>t.status_pekerjaan==='Selesai').length,
-pendingTasks:allTasks.filter(t=>t.status_pekerjaan!=='Selesai').length,
-todayTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'day')).length,
-weeklyTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
+totalTasks: allTasks.length,
+totalUsers: this.registeredUsers.length,
+completedTasks: allTasks.filter(t=>t.status_pekerjaan==='Selesai').length,
+pendingTasks: allTasks.filter(t=>t.status_pekerjaan!=='Selesai').length,
+todayTasks: allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'day')).length,
+weeklyTasks: allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
 monthlyTasks:allTasks.filter(t=>dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length,
 thisWeekCompleted:allTasks.filter(t=>t.status_pekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day'))).length,
 thisMonthCompleted:allTasks.filter(t=>t.status_pekerjaan==='Selesai' && dayjs(t.tanggal,'DD/MM/YYYY').isSame(now,'month')).length
@@ -1428,104 +1597,154 @@ thisMonthCompleted:allTasks.filter(t=>t.status_pekerjaan==='Selesai' && dayjs(t.
 // Get detailed daily stats per user
 getDailyStatsPerUser(){
 try{
-const allTasks=this.getAllUserTasks();
-const now=dayjs();
-const today=now.format('DD/MM/YYYY');
-const userStats={};
+// PERBAIKI: Gunakan savedTasks yang sudah sinkron dari Supabase
+const allTasks = this.savedTasks;
+const now = dayjs();
+const today = now.format('DD/MM/YYYY');
+const userStats = {};
 
-this.regularUsers.forEach(user=>{
-const userTasks=allTasks.filter(task=>task.user_id===user.id && task.tanggal===today);
-userStats[user.id]={
-userName:user.name,
-totalTasks:userTasks.length,
-completedTasks:userTasks.filter(t=>t.status_pekerjaan==='Selesai').length,
-pendingTasks:userTasks.filter(t=>t.status_pekerjaan!=='Selesai').length,
-tasks:userTasks
-};
+console.log('📊 Calculating daily stats per user from savedTasks:', {
+  totalTasks: allTasks.length,
+  today: today,
+  usersCount: this.registeredUsers.length
+});
+
+this.registeredUsers.forEach(user => {
+  const userTasks = allTasks.filter(task => task.user_id === user.id && task.tanggal === today);
+  userStats[user.id] = {
+    userName: user.name,
+    totalTasks: userTasks.length,
+    completedTasks: userTasks.filter(t => t.status_pekerjaan === 'Selesai').length,
+    pendingTasks: userTasks.filter(t => t.status_pekerjaan !== 'Selesai').length,
+    tasks: userTasks
+  };
+  
+  console.log(`📊 User ${user.name} daily stats:`, {
+    userId: user.id,
+    totalTasks: userTasks.length,
+    completedTasks: userTasks.filter(t => t.status_pekerjaan === 'Selesai').length,
+    pendingTasks: userTasks.filter(t => t.status_pekerjaan !== 'Selesai').length
+  });
 });
 
 return userStats;
-}catch(error){
-console.error('Error in getDailyStatsPerUser:', error);
-return{};
+} catch(error){
+  console.error('Error in getDailyStatsPerUser:', error);
+  return {};
 }
 },
 
 // Get detailed weekly stats per user
 getWeeklyStatsPerUser(){
 try{
-const allTasks=this.getAllUserTasks();
-const now=dayjs();
-const userStats={};
+// PERBAIKI: Gunakan savedTasks yang sudah sinkron dari Supabase
+const allTasks = this.savedTasks;
+const now = dayjs();
+const userStats = {};
 
-this.regularUsers.forEach(user=>{
-const userTasks=allTasks.filter(task=>task.user_id===user.id && dayjs(task.tanggal,'DD/MM/YYYY').isAfter(now.subtract(7,'day')));
-userStats[user.id]={
-userName:user.name,
-totalTasks:userTasks.length,
-completedTasks:userTasks.filter(t=>t.status_pekerjaan==='Selesai').length,
-pendingTasks:userTasks.filter(t=>t.status_pekerjaan!=='Selesai').length,
-tasks:userTasks
-};
+console.log('📊 Calculating weekly stats per user from savedTasks:', {
+  totalTasks: allTasks.length,
+  weekStart: now.subtract(7, 'day').format('DD/MM/YYYY'),
+  usersCount: this.registeredUsers.length
+});
+
+this.registeredUsers.forEach(user => {
+  const userTasks = allTasks.filter(task => task.user_id === user.id && dayjs(task.tanggal, 'DD/MM/YYYY').isAfter(now.subtract(7, 'day')));
+  userStats[user.id] = {
+    userName: user.name,
+    totalTasks: userTasks.length,
+    completedTasks: userTasks.filter(t => t.status_pekerjaan === 'Selesai').length,
+    pendingTasks: userTasks.filter(t => t.status_pekerjaan !== 'Selesai').length,
+    tasks: userTasks
+  };
+  
+  console.log(`📊 User ${user.name} weekly stats:`, {
+    userId: user.id,
+    totalTasks: userTasks.length,
+    completedTasks: userTasks.filter(t => t.status_pekerjaan === 'Selesai').length,
+    pendingTasks: userTasks.filter(t => t.status_pekerjaan !== 'Selesai').length
+  });
 });
 
 return userStats;
-}catch(error){
-console.error('Error in getWeeklyStatsPerUser:', error);
-return{};
+} catch(error){
+  console.error('Error in getWeeklyStatsPerUser:', error);
+  return {};
 }
 },
 
 // Get detailed monthly stats per user
 getMonthlyStatsPerUser(){
 try{
-const allTasks=this.getAllUserTasks();
-const now=dayjs();
-const userStats={};
+// PERBAIKI: Gunakan savedTasks yang sudah sinkron dari Supabase
+const allTasks = this.savedTasks;
+const now = dayjs();
+const userStats = {};
 
-this.regularUsers.forEach(user=>{
-const userTasks=allTasks.filter(task=>task.user_id===user.id && dayjs(task.tanggal,'DD/MM/YYYY').isSame(now,'month'));
-userStats[user.id]={
-userName:user.name,
-totalTasks:userTasks.length,
-completedTasks:userTasks.filter(t=>t.status_pekerjaan==='Selesai').length,
-pendingTasks:userTasks.filter(t=>t.status_pekerjaan!=='Selesai').length,
-tasks:userTasks
-};
+console.log('📊 Calculating monthly stats per user from savedTasks:', {
+  totalTasks: allTasks.length,
+  currentMonth: now.format('MMMM YYYY'),
+  usersCount: this.registeredUsers.length
+});
+
+this.registeredUsers.forEach(user => {
+  const userTasks = allTasks.filter(task => task.user_id === user.id && dayjs(task.tanggal, 'DD/MM/YYYY').isSame(now, 'month'));
+  userStats[user.id] = {
+    userName: user.name,
+    totalTasks: userTasks.length,
+    completedTasks: userTasks.filter(t => t.status_pekerjaan === 'Selesai').length,
+    pendingTasks: userTasks.filter(t => t.status_pekerjaan !== 'Selesai').length,
+    tasks: userTasks
+  };
+  
+  console.log(`📊 User ${user.name} monthly stats:`, {
+    userId: user.id,
+    totalTasks: userTasks.length,
+    completedTasks: userTasks.filter(t => t.status_pekerjaan === 'Selesai').length,
+    pendingTasks: userTasks.filter(t => t.status_pekerjaan !== 'Selesai').length
+  });
 });
 
 return userStats;
-}catch(error){
-console.error('Error in getMonthlyStatsPerUser:', error);
-return{};
+} catch(error){
+  console.error('Error in getMonthlyStatsPerUser:', error);
+  return {};
 }
 },
 
 // Get weekly stats by week number (1-4)
 getWeeklyStatsByWeek(){
 try{
-const allTasks=this.getAllUserTasks();
-const now=dayjs();
-const currentMonth=now.month();
-const currentYear=now.year();
-const weekStats={};
+// PERBAIKI: Gunakan savedTasks yang sudah sinkron dari Supabase
+const allTasks = this.savedTasks;
+const now = dayjs();
+const currentMonth = now.month();
+const currentYear = now.year();
+const weekStats = {};
+
+console.log('📊 Calculating weekly stats by week from savedTasks:', {
+  totalTasks: allTasks.length,
+  currentMonth: now.format('MMMM'),
+  currentYear: currentYear,
+  usersCount: this.registeredUsers.length
+});
 
 // Initialize weeks 1-4
-for(let i=1;i<=4;i++){
-weekStats[i]={
-weekNumber:i,
-userStats:{},
-totalTasks:0,
-totalCompleted:0
-};
+for(let i = 1; i <= 4; i++){
+  weekStats[i] = {
+    weekNumber: i,
+    userStats: {},
+    totalTasks: 0,
+    totalCompleted: 0
+  };
 }
 
-this.regularUsers.forEach(user=>{
-// Initialize user stats for each week
-for(let i=1;i<=4;i++){
-weekStats[i].userStats[user.id]={
-userName:user.name,
-totalTasks:0,
+this.registeredUsers.forEach(user => {
+  // Initialize user stats for each week
+  for(let i = 1; i <= 4; i++){
+    weekStats[i].userStats[user.id] = {
+      userName: user.name,
+      totalTasks: 0,
 completedTasks:0,
 pendingTasks:0
 };
