@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>UPSRS GO! - Pro Edition</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔧</text></svg>">
 
 <!-- Tailwind CSS -->
 <script>
@@ -162,6 +163,11 @@ _cacheTimestamp: null,
 _cacheTimeout: 30000, // 30 seconds cache
 _isFetching: false,
 _lastFetchTime: null,
+
+// OPTIMASI: User cache properties
+_cachedUsers: null,
+_usersCacheTimestamp: null,
+_usersCacheTimeout: 60000, // 1 minute cache for users
 
 // Loading states
 isLoading: false,
@@ -763,17 +769,25 @@ async fetchUsers(){
     return;
   }
 
+  // OPTIMASI: Check user cache first
+  const now = Date.now();
+  if(this._cachedUsers && this._usersCacheTimestamp && (now - this._usersCacheTimestamp) < this._usersCacheTimeout){
+    console.log('⚡ Using cached users, skipping fetch');
+    this.registeredUsers = this._cachedUsers;
+    return;
+  }
+
   try {
     console.log('🚀 Fast fetching users from Supabase...');
     const startTime = performance.now();
     
-    // OPTIMASI: Production query dengan index optimization
+    // OPTIMASI: Production query dengan index optimization - hanya field yang dibutuhkan
     const { data, error } = await window.supabaseClient
       .from('users')
-      .select('id, name, username, role, specialization, profile_photo')
+      .select('id, name, username, role, specialization')
       .neq('role','admin')
-      .order('created_at', { ascending: false })
-      .limit(1000);
+      .order('name', { ascending: true }) // Order by name untuk performance
+      .limit(100); // Kurangi limit untuk performa
 
     if(!error && data){
       this.registeredUsers = data;
@@ -781,6 +795,11 @@ async fetchUsers(){
       
       const endTime = performance.now();
       console.log(`✅ Users fetched in ${(endTime - startTime).toFixed(2)}ms:`, data.length);
+      
+      // OPTIMASI: Cache users untuk performance
+      this._cachedUsers = data;
+      this._usersCacheTimestamp = Date.now();
+      
     } else if(error) {
       console.error('❌ Users fetch error:', error);
       window.supabaseHealthy = false;
