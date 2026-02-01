@@ -313,28 +313,63 @@ alert('Semua akun telah dihapus!');
 
 get filteredTasks(){
 try{
+console.log('🔍 DEBUG: Filtering tasks for user:', {
+  currentUser: this.currentUser,
+  userId: this.currentUser?.id,
+  username: this.currentUser?.username,
+  totalSavedTasks: this.savedTasks.length
+});
+
 // Return empty array if no current user
 if(!this.currentUser){
+console.log('❌ No current user found');
 return [];
 }
 
 // Super Admin can see all tasks, regular users only see their own
 if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
+console.log('👑 Admin user, showing all tasks');
 return this.getAllUserTasks();
 }
+
 // Regular users only see their own tasks
 const currentUserId = this.currentUser.id || this.currentUser.username;
-if(this.filterPeriod==='all')return this.savedTasks.filter(t=>t.user_id===currentUserId);
-const now=dayjs();
-return this.savedTasks.filter(t=>{
-const d=dayjs(t.tanggal,'DD/MM/YYYY');
-if(!d.isValid())return false;
-if(t.user_id!==currentUserId)return false; // Only user's own tasks
-if(this.filterPeriod==='today')return d.isSame(now,'day');
-if(this.filterPeriod==='week')return d.isAfter(now.subtract(7,'day'));
-if(this.filterPeriod==='month')return d.isSame(now,'month');
-return false;
+console.log('👤 Regular user, filtering by user_id:', currentUserId);
+
+const userTasks = this.savedTasks.filter(task => {
+  const matches = task.user_id === currentUserId;
+  if (matches) {
+    console.log('✅ Found task for user:', {
+      taskId: task.id,
+      taskUserId: task.user_id,
+      currentUserId: currentUserId,
+      taskTitle: task.masalah
+    });
+  }
+  return matches;
 });
+
+console.log('📊 Filtered tasks result:', {
+  totalTasks: this.savedTasks.length,
+  userTasks: userTasks.length,
+  currentUserId: currentUserId
+});
+
+if(this.filterPeriod==='all')return userTasks;
+
+const now=dayjs();
+const filteredByPeriod = userTasks.filter(t=>{
+  const d=dayjs(t.tanggal,'DD/MM/YYYY');
+  if(!d.isValid())return false;
+  if(this.filterPeriod==='today')return d.isSame(now,'day');
+  if(this.filterPeriod==='week')return d.isAfter(now.subtract(7,'day'));
+  if(this.filterPeriod==='month')return d.isSame(now,'month');
+  return false;
+});
+
+console.log('📅 Final filtered tasks by period:', filteredByPeriod.length);
+return filteredByPeriod;
+
 }catch(error){
 console.error('❌ Error in filteredTasks:', error);
 return [];
@@ -364,8 +399,10 @@ async handleLogin(){
         .single();
 
       if (!error && data) {
+        console.log('✅ User found in Supabase:', data);
         this.currentUser = data;
         localStorage.setItem('upsrs_current_user', JSON.stringify(data));
+        console.log('👤 Current user set to:', this.currentUser);
         this.page = data.role === 'admin' ? 'adminDashboard' : 'dashboard';
         this.authUsername = '';
         this.authPassword = '';
@@ -382,7 +419,9 @@ async handleLogin(){
     return alert('Login gagal! Periksa username dan password.');
   }
 
+  console.log('✅ User found in localStorage:', u);
   this.currentUser = u;
+  console.log('👤 Current user set to:', this.currentUser);
   localStorage.setItem('upsrs_current_user', JSON.stringify(u));
   this.page = u.role === 'admin' ? 'adminDashboard' : 'dashboard';
   this.authUsername = '';
@@ -924,6 +963,12 @@ async saveTask(){
     };
 
     console.log('🔄 Saving task with data:', entry);
+console.log('👤 Current user info:', {
+  id: this.currentUser?.id,
+  username: this.currentUser?.username,
+  role: this.currentUser?.role,
+  name: this.currentUser?.name
+});
 
     // OPTIMASI: Network health check
     if (window.supabaseClient && window.supabaseHealthy) {
