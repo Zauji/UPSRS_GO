@@ -136,6 +136,10 @@ initApp(){
 console.log('🚀 Initializing UPSRS GO...');
 this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
 this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
+
+// OPTIMASI: Check storage quota on init
+this.manageStorageQuota();
+
 console.log('📊 Loaded users:', this.registeredUsers.length);
 console.log('📝 Loaded tasks:', this.savedTasks.length);
 
@@ -694,12 +698,28 @@ async fetchTasks(){
       return {
         ...task,
         nama: user ? user.name : 'Unknown User',
-        username: user ? user.username : 'unknown'
+        username: user ? user.username : 'unknown',
+        // OPTIMASI: Hapus foto dari localStorage untuk hemat quota
+        foto: task.foto ? 'HAS_PHOTO' : null // Simpan indicator saja
       };
     });
 
     this.savedTasks = formattedData;
-    localStorage.setItem('upsrs_tasks_v3', JSON.stringify(this.savedTasks));
+    
+    // OPTIMASI: Simpan tanpa foto ke localStorage untuk hemat quota
+    const tasksForStorage = formattedData.map(task => ({
+      ...task,
+      foto: null // Hapus foto dari localStorage
+    }));
+    
+    try {
+      localStorage.setItem('upsrs_tasks_v3', JSON.stringify(tasksForStorage));
+    } catch (storageError) {
+      console.warn('⚠️ localStorage quota exceeded, clearing old data...');
+      // Clear old data dan simpan yang penting saja
+      localStorage.removeItem('upsrs_tasks_v3');
+      localStorage.setItem('upsrs_tasks_v3', JSON.stringify(tasksForStorage.slice(0, 100))); // Simpan 100 terbaru
+    }
     
     const endTime = performance.now();
     console.log(`✅ Tasks fetched in ${(endTime - startTime).toFixed(2)}ms:`, formattedData.length);
@@ -725,6 +745,54 @@ clearCache(){
   this._cachedAllTasks = null;
   this._cacheTimestamp = null;
   console.log('🧹 Cache cleared');
+},
+
+// OPTIMASI: Fungsi untuk mengelola localStorage quota
+manageStorageQuota(){
+  try {
+    const storageSize = JSON.stringify(localStorage).length;
+    const maxSize = 5 * 1024 * 1024; // 5MB limit
+    const usagePercent = (storageSize / maxSize * 100).toFixed(2);
+    
+    console.log(`💾 Storage usage: ${usagePercent}% (${(storageSize/1024).toFixed(2)}KB)`);
+    
+    if(storageSize > maxSize * 0.8) { // 80% warning
+      console.warn('⚠️ Storage quota nearly full, cleaning old data...');
+      this.cleanOldTasks();
+    }
+  } catch(error) {
+    console.warn('⚠️ Could not check storage quota:', error);
+  }
+},
+
+// OPTIMASI: Fungsi untuk membersihkan task lama
+cleanOldTasks(){
+  try {
+    const tasks = JSON.parse(localStorage.getItem('upsrs_tasks_v3') || '[]');
+    if(tasks.length > 200) {
+      // Simpan 200 terbaru, hapus yang lama
+      const recentTasks = tasks.slice(0, 200);
+      localStorage.setItem('upsrs_tasks_v3', JSON.stringify(recentTasks));
+      console.log(`🧹 Cleaned old tasks, kept ${recentTasks.length} recent tasks`);
+    }
+  } catch(error) {
+    console.warn('⚠️ Error cleaning old tasks:', error);
+  }
+},
+
+// OPTIMASI: Fungsi untuk clear semua localStorage
+clearAllStorage(){
+  if(confirm('⚠️ Hapus semua data lokal? Ini akan menghapus cache tapi tidak data di server.')) {
+    localStorage.removeItem('upsrs_tasks_v3');
+    localStorage.removeItem('upsrs_users_v3');
+    localStorage.removeItem('upsrs_current_user');
+    this.savedTasks = [];
+    this.registeredUsers = [];
+    this.currentUser = null;
+    this.page = 'login';
+    console.log('🗑️ All local storage cleared');
+    alert('✅ Data lokal berhasil dihapus. Silakan login kembali.');
+  }
 },
 
 // Ensure tasks table exists in Supabase
@@ -1887,8 +1955,17 @@ base64ToBlob(base64) {
 <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition">
 <div @click="viewingTask=task" class="flex items-start gap-4 cursor-pointer">
 <div class="w-16 h-16 bg-slate-100 rounded-xl overflow-hidden shrink-0">
-<template x-if="task.foto"><img :src="task.foto" class="w-full h-full object-cover"></template>
-<template x-if="!task.foto"><div class="w-full h-full flex items-center justify-center text-slate-300 text-xs">No Image</div></template>
+<template x-if="task.foto && task.foto !== 'HAS_PHOTO'">
+<img :src="task.foto" class="w-full h-full object-cover">
+</template>
+<template x-if="task.foto === 'HAS_PHOTO'">
+<div class="w-full h-full flex items-center justify-center bg-blue-100">
+<svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+</div>
+</template>
+<template x-if="!task.foto">
+<div class="w-full h-full flex items-center justify-center text-slate-300 text-xs">No Image</div>
+</template>
 </div>
 <div class="flex-1">
 <h4 class="font-bold text-sm text-slate-800" x-text="task.ruangan"></h4>
@@ -1915,15 +1992,27 @@ Share WhatsApp
 </div>
 </div>
 </div>
-
 <!-- Modal Detail Laporan -->
 <div x-show="viewingTask" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60" @click.away="viewingTask=null">
 <div class="bg-white w-full max-w-md rounded-2xl overflow-hidden shadow-2xl" @click.stop>
 <div class="h-64 bg-slate-100 relative">
-<template x-if="viewingTask?.foto"><img :src="viewingTask.foto" class="w-full h-full object-cover"></template>
-<template x-if="!viewingTask?.foto"><div class="w-full h-full flex items-center justify-center text-slate-300 font-bold">No Image</div></template>
+<template x-if="viewingTask?.foto && viewingTask?.foto !== 'HAS_PHOTO'">
+<img :src="viewingTask.foto" class="w-full h-full object-cover">
+</template>
+<template x-if="viewingTask?.foto === 'HAS_PHOTO'">
+<div class="w-full h-full flex items-center justify-center bg-blue-100">
+<div class="text-center">
+<svg class="w-12 h-12 mx-auto text-blue-600 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+<p class="text-sm text-blue-600 font-bold">Foto Tersedia</p>
+<p class="text-xs text-blue-500">Di server Supabase</p>
+</div>
+</div>
+</template>
+<template x-if="!viewingTask?.foto">
+<div class="w-full h-full flex items-center justify-center text-slate-300 font-bold">No Image</div>
+</template>
 <div class="absolute top-4 right-4">
-<span :class="viewingTask?.statusPekerjaan==='Selesai'?'bg-emerald-500':'bg-orange-500'" class="px-3 py-1 rounded-full text-xs font-black text-white" x-text="viewingTask?.statusPekerjaan"></span>
+<span :class="viewingTask?.status_pekerjaan==='Selesai'?'bg-emerald-500':'bg-orange-500'" class="px-3 py-1 rounded-full text-xs font-black text-white" x-text="viewingTask?.status_pekerjaan"></span>
 </div>
 </div>
 <div class="p-6">
@@ -2149,6 +2238,7 @@ Share WhatsApp
 <h3 class="text-lg font-black text-slate-800">Kelola User Terdaftar</h3>
 <div class="flex gap-2 flex-wrap">
 <button @click="refreshAllData" class="px-4 py-2 bg-green-100 text-green-600 rounded-xl text-sm font-bold hover:bg-green-200">🔄 Refresh</button>
+<button @click="clearAllStorage" class="px-4 py-2 bg-red-100 text-red-600 rounded-xl text-sm font-bold hover:bg-red-200">🗑️ Clear Cache</button>
 </div>
 </div>
 <div class="space-y-4">
@@ -2241,8 +2331,17 @@ Share WhatsApp
 <div class="bg-slate-50 p-4 rounded-xl hover:bg-slate-100 transition">
 <div class="flex items-start gap-4">
 <div class="w-16 h-16 bg-slate-200 rounded-xl overflow-hidden shrink-0">
-<template x-if="task.foto"><img :src="task.foto" class="w-full h-full object-cover"></template>
-<template x-if="!task.foto"><div class="w-full h-full flex items-center justify-center text-slate-300 text-xs">No Image</div></template>
+<template x-if="task.foto && task.foto !== 'HAS_PHOTO'">
+<img :src="task.foto" class="w-full h-full object-cover">
+</template>
+<template x-if="task.foto === 'HAS_PHOTO'">
+<div class="w-full h-full flex items-center justify-center bg-blue-100">
+<svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+</div>
+</template>
+<template x-if="!task.foto">
+<div class="w-full h-full flex items-center justify-center text-slate-300 text-xs">No Image</div>
+</template>
 </div>
 <div class="flex-1">
 <div class="flex items-center gap-2 mb-2">
@@ -2390,8 +2489,17 @@ Share WhatsApp
 <div class="bg-slate-50 p-4 rounded-xl hover:bg-slate-100 transition">
 <div class="flex items-start gap-4">
 <div class="w-16 h-16 bg-slate-200 rounded-xl overflow-hidden shrink-0">
-<template x-if="task.foto"><img :src="task.foto" class="w-full h-full object-cover"></template>
-<template x-if="!task.foto"><div class="w-full h-full flex items-center justify-center text-slate-300 text-xs">No Image</div></template>
+<template x-if="task.foto && task.foto !== 'HAS_PHOTO'">
+<img :src="task.foto" class="w-full h-full object-cover">
+</template>
+<template x-if="task.foto === 'HAS_PHOTO'">
+<div class="w-full h-full flex items-center justify-center bg-blue-100">
+<svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+</div>
+</template>
+<template x-if="!task.foto">
+<div class="w-full h-full flex items-center justify-center text-slate-300 text-xs">No Image</div>
+</template>
 </div>
 <div class="flex-1">
 <div class="flex items-center gap-2 mb-2">
