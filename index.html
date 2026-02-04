@@ -669,38 +669,76 @@ async fetchTasks(){
   }
 
   try {
-    console.log('🚀 Fast fetching tasks from Supabase...');
+    console.log('🚀 Ultra fast fetching tasks from Supabase...');
     const startTime = performance.now();
     
-    // CARA CEPAT: Fetch tasks tanpa JOIN, lalu map nama user
-    const { data: tasks, error: tasksError } = await window.supabaseClient
-      .from('tasks')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(1000); // Batasi untuk performa
+    // OPTIMASI: Query dengan field yang valid + fallback ke select('*')
+    let tasks, tasksError;
+    
+    try {
+      // Coba query spesifik dulu dengan field yang valid
+      const result = await window.supabaseClient
+        .from('tasks')
+        .select(`
+          id,
+          user_id,
+          tanggal,
+          waktu,
+          gedung,
+          ruangan,
+          pelapor,
+          masalah,
+          penyelesaian,
+          status_pekerjaan,
+          created_at
+        `)
+        .order('created_at', { ascending: false })
+        .limit(500);
+      
+      tasks = result.data;
+      tasksError = result.error;
+      
+    } catch (selectError) {
+      console.warn('⚠️ Specific query failed, trying fallback:', selectError);
+      // Fallback ke query umum
+      const fallbackResult = await window.supabaseClient
+        .from('tasks')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(500);
+      
+      tasks = fallbackResult.data;
+      tasksError = fallbackResult.error;
+    }
 
     if(tasksError) {
       console.error('❌ Error fetching tasks:', tasksError);
-      this.savedTasks = [];
-      return;
+      console.log('📊 Using localStorage fallback due to Supabase error');
+      return; // Gunakan localStorage yang sudah ada
     }
 
     if(!tasks || tasks.length === 0) {
-      this.savedTasks = [];
-      console.log('📝 No tasks found in Supabase');
-      this.clearCache();
-      return;
+      console.log('📝 No tasks found in Supabase, using localStorage');
+      return; // Gunakan localStorage yang sudah ada
     }
 
-    // Map nama user dari registeredUsers (lebih cepat dari JOIN)
+    // OPTIMASI: Pre-create user map untuk O(1) lookup
+    const userMap = new Map();
+    this.registeredUsers.forEach(user => {
+      userMap.set(user.id, user.name);
+      userMap.set(user.username, user.name); // Fallback
+    });
+
+    // Map nama user dengan O(1) lookup (jauh lebih cepat dari find())
     const formattedData = tasks.map(task => {
-      const user = this.registeredUsers.find(u => u.id === task.user_id);
+      const userName = userMap.get(task.user_id) || userMap.get(task.username) || 'Unknown User';
       return {
         ...task,
-        nama: user ? user.name : 'Unknown User',
-        username: user ? user.username : 'unknown',
+        nama: userName,
+        username: userMap.get(task.user_id) || task.username || 'unknown',
+        teknisi: userName, // Tambahkan teknisi untuk compatibility UI
         // OPTIMASI: Hapus foto dari localStorage untuk hemat quota
-        foto: task.foto ? 'HAS_PHOTO' : null // Simpan indicator saja
+        foto: task.foto ? 'HAS_PHOTO' : null // Indicator untuk foto
       };
     });
 
@@ -716,13 +754,12 @@ async fetchTasks(){
       localStorage.setItem('upsrs_tasks_v3', JSON.stringify(tasksForStorage));
     } catch (storageError) {
       console.warn('⚠️ localStorage quota exceeded, clearing old data...');
-      // Clear old data dan simpan yang penting saja
       localStorage.removeItem('upsrs_tasks_v3');
-      localStorage.setItem('upsrs_tasks_v3', JSON.stringify(tasksForStorage.slice(0, 100))); // Simpan 100 terbaru
+      localStorage.setItem('upsrs_tasks_v3', JSON.stringify(tasksForStorage.slice(0, 100)));
     }
     
     const endTime = performance.now();
-    console.log(`✅ Tasks fetched in ${(endTime - startTime).toFixed(2)}ms:`, formattedData.length);
+    console.log(`✅ Ultra fast tasks fetched in ${(endTime - startTime).toFixed(2)}ms:`, formattedData.length);
     console.log('📝 Task samples:', formattedData.slice(0, 3).map(t => ({
       id: t.id,
       user_id: t.user_id,
@@ -736,7 +773,8 @@ async fetchTasks(){
 
   } catch (error) {
     console.error('❌ Critical error fetching tasks:', error);
-    this.savedTasks = [];
+    console.log('📊 Using localStorage fallback due to critical error');
+    // Tetap gunakan localStorage yang sudah ada
   }
 },
 
@@ -792,6 +830,86 @@ clearAllStorage(){
     this.page = 'login';
     console.log('🗑️ All local storage cleared');
     alert('✅ Data lokal berhasil dihapus. Silakan login kembali.');
+  }
+},
+
+// OPTIMASI: Test koneksi dan verifikasi schema
+async testSupabaseConnection(){
+  console.log('🔍 Testing Supabase connection and schema...');
+  
+  if(!window.supabaseClient) {
+    console.error('❌ Supabase client not initialized');
+    return false;
+  }
+
+  try {
+    // Test 1: Basic connection
+    console.log('📡 Testing basic connection...');
+    const { data: connectionTest, error: connError } = await window.supabaseClient
+      .from('users')
+      .select('count')
+      .limit(1);
+    
+    if(connError) {
+      console.error('❌ Connection test failed:', connError);
+      return false;
+    }
+    
+    console.log('✅ Basic connection successful');
+
+    // Test 2: Check users table schema
+    console.log('👥 Checking users table schema...');
+    const { data: usersSample, error: usersError } = await window.supabaseClient
+      .from('users')
+      .select('*')
+      .limit(1);
+    
+    if(usersError) {
+      console.error('❌ Users table error:', usersError);
+    } else {
+      console.log('✅ Users table accessible');
+      if(usersSample && usersSample.length > 0) {
+        console.log('📋 Users table fields:', Object.keys(usersSample[0]));
+      }
+    }
+
+    // Test 3: Check tasks table schema
+    console.log('📝 Checking tasks table schema...');
+    const { data: tasksSample, error: tasksError } = await window.supabaseClient
+      .from('tasks')
+      .select('*')
+      .limit(1);
+    
+    if(tasksError) {
+      console.error('❌ Tasks table error:', tasksError);
+      return false;
+    } else {
+      console.log('✅ Tasks table accessible');
+      if(tasksSample && tasksSample.length > 0) {
+        console.log('📋 Tasks table fields:', Object.keys(tasksSample[0]));
+      }
+    }
+
+    // Test 4: Check data counts
+    console.log('📊 Checking data counts...');
+    const { count: usersCount } = await window.supabaseClient
+      .from('users')
+      .select('*', { count: 'exact', head: true });
+    
+    const { count: tasksCount } = await window.supabaseClient
+      .from('tasks')
+      .select('*', { count: 'exact', head: true });
+    
+    console.log(`📈 Database summary:`);
+    console.log(`   👥 Users: ${usersCount || 0} records`);
+    console.log(`   📝 Tasks: ${tasksCount || 0} records`);
+
+    console.log('✅ Supabase connection and schema test completed successfully');
+    return true;
+
+  } catch (error) {
+    console.error('❌ Critical error during connection test:', error);
+    return false;
   }
 },
 
@@ -855,13 +973,23 @@ if(this._cachedAllTasks && this._cacheTimestamp && (Date.now() - this._cacheTime
   return this._cachedAllTasks;
 }
 
+// OPTIMASI: Pre-create user map untuk O(1) lookup
+const userMap = new Map();
+this.regularUsers.forEach(user => {
+  userMap.set(user.id, { profile_photo: user.profile_photo, role: user.role });
+});
+
 const allTasks=[];
-this.regularUsers.forEach(user=>{
-  // BENAR: Gunakan user_id untuk filtering
-  const userTasks=this.savedTasks.filter(task=>task.user_id===user.id);
-  userTasks.forEach(task=>{
-    allTasks.push({...task,userProfile:user.profile_photo,userRole:user.role});
-  });
+this.savedTasks.forEach(task=>{
+  // OPTIMASI: O(1) lookup dengan Map
+  const userInfo = userMap.get(task.user_id);
+  if(userInfo) {
+    allTasks.push({
+      ...task,
+      userProfile: userInfo.profile_photo,
+      userRole: userInfo.role
+    });
+  }
 });
 
 const sorted = allTasks.sort((a,b)=>{
@@ -883,10 +1011,8 @@ return [];
 
 // Get user statistics for admin dashboard
 getUserStats(userId){
-const user = this.registeredUsers.find(u => u.id === userId);
-if(!user) return { totalTasks: 0, completedTasks: 0, pendingTasks: 0 };
-// BENAR: Gunakan user_id untuk filtering
-const userTasks = this.savedTasks.filter(t => t.user_id===user.id);
+// OPTIMASI: Langsung filter tanpa find() - O(n) vs O(n²)
+const userTasks = this.savedTasks.filter(t => t.user_id===userId);
 return{
 totalTasks:userTasks.length,
 completedTasks:userTasks.filter(t=>t.status_pekerjaan==='Selesai').length,
@@ -1252,10 +1378,8 @@ this.editingTask=null;
 
 // Get user reports for viewing
 getUserReports(userId){
-const user=this.registeredUsers.find(u=>u.id===userId);
-if(!user)return [];
-// BENAR: Gunakan user_id untuk filtering, bukan teknisi
-return this.savedTasks.filter(task=>task.user_id===user.id).sort((a,b)=>{
+// OPTIMASI: Langsung filter tanpa find() - O(n) vs O(n²)
+return this.savedTasks.filter(task=>task.user_id===userId).sort((a,b)=>{
 const dateA=dayjs(a.tanggal,'DD/MM/YYYY');
 const dateB=dayjs(b.tanggal,'DD/MM/YYYY');
 return dateB.isAfter(dateA)?1:-1;
@@ -2237,6 +2361,7 @@ Share WhatsApp
 <div class="flex items-center justify-between mb-4">
 <h3 class="text-lg font-black text-slate-800">Kelola User Terdaftar</h3>
 <div class="flex gap-2 flex-wrap">
+<button @click="testSupabaseConnection" class="px-4 py-2 bg-blue-100 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-200">🔍 Test Connection</button>
 <button @click="refreshAllData" class="px-4 py-2 bg-green-100 text-green-600 rounded-xl text-sm font-bold hover:bg-green-200">🔄 Refresh</button>
 <button @click="clearAllStorage" class="px-4 py-2 bg-red-100 text-red-600 rounded-xl text-sm font-bold hover:bg-red-200">🗑️ Clear Cache</button>
 </div>
