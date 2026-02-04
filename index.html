@@ -235,23 +235,34 @@ async handleLogin(){
   // Try Supabase first if available
   if (window.supabaseClient) {
     try {
+      // OPTIMASI: Query user by username saja, lalu compare password di client
       const { data, error } = await supabaseClient
         .from('users')
         .select('*')
         .eq('username', this.authUsername)
-        .eq('password', this.authPassword)
         .single();
 
-      if (!error && data) {
+      if (!error && data && data.password === this.authPassword) {
         this.currentUser = data;
         localStorage.setItem('upsrs_current_user', JSON.stringify(data));
         this.page = data.role === 'admin' ? 'adminDashboard' : 'dashboard';
         this.authUsername = '';
         this.authPassword = '';
+        
+        // Refresh data jika admin
+        if(data.role === 'admin') {
+          setTimeout(() => {
+            this.fetchUsers();
+            this.fetchTasks();
+          }, 100);
+        }
+        
         return;
+      } else if (!error && data) {
+        console.warn('⚠️ Password mismatch for user:', this.authUsername);
       }
     } catch (supabaseError) {
-      console.warn('Supabase login failed, trying fallback:', supabaseError);
+      console.warn('⚠️ Supabase login failed, trying fallback:', supabaseError);
     }
   }
 
@@ -266,6 +277,14 @@ async handleLogin(){
   this.page = u.role === 'admin' ? 'adminDashboard' : 'dashboard';
   this.authUsername = '';
   this.authPassword = '';
+  
+  // Refresh data jika admin
+  if(u.role === 'admin') {
+    setTimeout(() => {
+      this.fetchUsers();
+      this.fetchTasks();
+    }, 100);
+  }
 },
 
 async handleRegister(){
@@ -328,15 +347,15 @@ async handleAdminLogin(){
   // Try Supabase first if available
   if (window.supabaseClient) {
     try {
+      // OPTIMASI: Query admin by username & role, lalu compare password di client
       const { data, error } = await window.supabaseClient
         .from('users')
         .select('*')
         .eq('username', this.authUsername)
-        .eq('password', this.authPassword)
         .eq('role', 'admin')
         .single();
 
-      if(!error && data) {
+      if(!error && data && data.password === this.authPassword) {
         this.currentUser = data;
         localStorage.setItem('upsrs_current_user', JSON.stringify(data));
         this.page='adminDashboard';
@@ -347,9 +366,11 @@ async handleAdminLogin(){
         await this.fetchUsers();
         await this.fetchTasks();
         return;
+      } else if (!error && data) {
+        console.warn('⚠️ Admin password mismatch for:', this.authUsername);
       }
     } catch (supabaseError) {
-      console.warn('Supabase admin login failed, trying fallback:', supabaseError);
+      console.warn('⚠️ Supabase admin login failed, trying fallback:', supabaseError);
     }
   }
 
