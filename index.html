@@ -151,9 +151,12 @@ console.log('👤 Current user found:', this.currentUser?.username, 'Role:', thi
 if(this.currentUser?.username==='Admin' && this.currentUser?.role==='admin'){
 this.page='adminDashboard';
 console.log('👑 Redirecting to admin dashboard');
-// Fetch latest data from Supabase for admin
-this.fetchUsers();
-this.fetchTasks();
+// OPTIMASI: Delayed fetch untuk tidak blocking init
+setTimeout(() => {
+  console.log('🔄 Delayed data fetch starting...');
+  this.fetchUsers();
+  this.fetchTasks();
+}, 100);
 }else{
 this.page='dashboard';
 console.log('👤 Redirecting to user dashboard');
@@ -638,13 +641,24 @@ get isAdmin(){
 return this.currentUser?.role==='admin';
 },
 
+// OPTIMASI: Debouncing untuk prevent multiple fetch calls
+_fetchUsersDebounced: null,
+_fetchTasksDebounced: null,
+
 async fetchUsers(){
+  // OPTIMASI: Debouncing untuk prevent multiple calls
+  if(this._fetchUsersDebounced) {
+    console.log('⏳ Users fetch already in progress, skipping...');
+    return;
+  }
+
   // Skip if Supabase is not available (offline mode)
   if (!window.supabaseClient) {
     console.log('📊 Using localStorage for users (offline mode)');
     return;
   }
 
+  this._fetchUsersDebounced = true;
   try {
     const { data, error } = await window.supabaseClient
       .from('users')
@@ -658,6 +672,8 @@ async fetchUsers(){
     }
   } catch (error) {
     console.warn('⚠️ Failed to fetch users from Supabase, using localStorage:', error);
+  } finally {
+    this._fetchUsersDebounced = false;
   }
 },
 
@@ -668,6 +684,13 @@ async fetchTasks(){
     return;
   }
 
+  // OPTIMASI: Debouncing untuk prevent multiple calls
+  if(this._fetchTasksDebounced) {
+    console.log('⏳ Tasks fetch already in progress, skipping...');
+    return;
+  }
+
+  this._fetchTasksDebounced = true;
   try {
     console.log('🚀 Ultra fast fetching tasks from Supabase...');
     const startTime = performance.now();
@@ -775,6 +798,8 @@ async fetchTasks(){
     console.error('❌ Critical error fetching tasks:', error);
     console.log('📊 Using localStorage fallback due to critical error');
     // Tetap gunakan localStorage yang sudah ada
+  } finally {
+    this._fetchTasksDebounced = false;
   }
 },
 
@@ -1457,12 +1482,25 @@ try {
     return;
   }
   
-  // PARALLEL FETCHING - lebih cepat
-  console.log('⚡ Parallel fetching users and tasks...');
-  const [usersResult, tasksResult] = await Promise.allSettled([
-    this.fetchUsers(),
-    this.fetchTasks()
-  ]);
+  // OPTIMASI: Sequential fetch dengan delay untuk avoid rate limiting
+  console.log('⚡ Fast sequential fetching...');
+  
+  try {
+    await this.fetchUsers();
+    console.log('✅ Users refreshed');
+  } catch (error) {
+    console.warn('⚠️ Users fetch failed:', error);
+  }
+  
+  // Small delay untuk avoid rate limiting
+  await new Promise(resolve => setTimeout(resolve, 100));
+  
+  try {
+    await this.fetchTasks();
+    console.log('✅ Tasks refreshed');
+  } catch (error) {
+    console.warn('⚠️ Tasks fetch failed:', error);
+  }
   
   const endTime = performance.now();
   console.log(`✅ Fast refresh completed in ${(endTime - startTime).toFixed(2)}ms`);
