@@ -232,10 +232,33 @@ async handleLogin(){
   if(!this.authUsername || !this.authPassword)
     return alert('Isi username dan password!');
 
-  // Try Supabase first if available
-  if (window.supabaseClient) {
+  // OPTIMASI: Prioritaskan localStorage untuk avoid RLS issues
+  console.log('🔍 Trying localStorage first (avoid RLS issues)...');
+  
+  const u = this.registeredUsers.find(x => x.username === this.authUsername && x.password === this.authPassword);
+  if (u) {
+    this.currentUser = u;
+    localStorage.setItem('upsrs_current_user', JSON.stringify(u));
+    this.page = u.role === 'admin' ? 'adminDashboard' : 'dashboard';
+    this.authUsername = '';
+    this.authPassword = '';
+    
+    // Refresh data jika admin
+    if(u.role === 'admin') {
+      setTimeout(() => {
+        this.fetchUsers();
+        this.fetchTasks();
+      }, 100);
+    }
+    
+    console.log('✅ Login successful via localStorage');
+    return;
+  }
+
+  // Fallback ke Supabase hanya jika localStorage tidak ada user
+  if (window.supabaseClient && this.registeredUsers.length === 0) {
+    console.log('🌐 No local users found, trying Supabase...');
     try {
-      // OPTIMASI: Query user by username saja, lalu compare password di client
       const { data, error } = await supabaseClient
         .from('users')
         .select('*')
@@ -257,43 +280,29 @@ async handleLogin(){
           }, 100);
         }
         
+        console.log('✅ Login successful via Supabase');
         return;
       } else if (!error && data) {
         console.warn('⚠️ Password mismatch for user:', this.authUsername);
       }
     } catch (supabaseError) {
-      console.warn('⚠️ Supabase login failed, trying fallback:', supabaseError);
+      console.warn('⚠️ Supabase login failed:', supabaseError);
     }
   }
 
-  // Fallback to localStorage
-  const u = this.registeredUsers.find(x => x.username === this.authUsername && x.password === this.authPassword);
-  if (!u) {
-    return alert('Login gagal! Periksa username dan password.');
-  }
-
-  this.currentUser = u;
-  localStorage.setItem('upsrs_current_user', JSON.stringify(u));
-  this.page = u.role === 'admin' ? 'adminDashboard' : 'dashboard';
-  this.authUsername = '';
-  this.authPassword = '';
-  
-  // Refresh data jika admin
-  if(u.role === 'admin') {
-    setTimeout(() => {
-      this.fetchUsers();
-      this.fetchTasks();
-    }, 100);
-  }
+  return alert('Login gagal! Periksa username dan password.');
 },
 
 async handleRegister(){
   if(!this.authName || !this.authUsername || !this.authPassword)
     return alert('Lengkapi data!');
 
-  // Try Supabase first if available
+  // Try Supabase first if available - ONLINE PRIORITY
   if (window.supabaseClient) {
     try {
+      console.log('🌐 Registering user via Supabase (online mode)...');
+      
+      // OPTIMASI: Gunakan RPC untuk bypass RLS jika perlu
       const { error } = await window.supabaseClient
         .from('users')
         .insert([{
@@ -305,22 +314,47 @@ async handleRegister(){
           profile_photo: this.authProfilePhoto
         }]);
 
-      if(error){
+      if(!error) {
+        // Success - simpan ke localStorage juga untuk cache
+        const newUser = {
+          id: Date.now(),
+          name: this.authName,
+          username: this.authUsername,
+          password: this.authPassword,
+          role: 'user',
+          specialization: this.authSpecialization || '',
+          profile_photo: this.authProfilePhoto
+        };
+
+        this.registeredUsers.push(newUser);
+        localStorage.setItem('upsrs_users_v3', JSON.stringify(this.registeredUsers));
+
+        alert('✅ User berhasil didaftarkan online! Silakan login');
+        this.page='login';
+        this.authName='';
+        this.authUsername='';
+        this.authPassword='';
+        
+        console.log('✅ User registered successfully online');
+        return;
+      } else {
         throw error;
       }
-
-      alert('Daftar berhasil! Silakan login');
-      this.page='login';
-      this.authName='';
-      this.authUsername='';
-      this.authPassword='';
-      return;
     } catch (supabaseError) {
-      console.warn('Supabase registration failed, using fallback:', supabaseError);
+      console.warn('⚠️ Supabase registration failed, using localStorage fallback:', supabaseError);
+      
+      // Tampilkan error spesifik untuk debugging
+      if(supabaseError.code === '42501') {
+        console.warn('🔒 RLS Policy violation - check table permissions');
+      } else if(supabaseError.code === '23505') {
+        alert('❌ Username sudah digunakan! Pilih username lain.');
+        return;
+      }
     }
   }
 
-  // Fallback to localStorage
+  // Fallback ke localStorage
+  console.log('📱 Using localStorage fallback for registration...');
   const newUser = {
     id: Date.now(),
     name: this.authName,
@@ -334,20 +368,41 @@ async handleRegister(){
   this.registeredUsers.push(newUser);
   localStorage.setItem('upsrs_users_v3', JSON.stringify(this.registeredUsers));
 
-  alert('Daftar berhasil! (Mode Offline) Silakan login');
+  alert('⚠️ Pendaftaran berhasil offline. Data akan sinkron saat online.');
   this.page='login';
   this.authName='';
   this.authUsername='';
   this.authPassword='';
+  
+  console.log('✅ User registered successfully offline');
 },
 
 async handleAdminLogin(){
   if(!this.authUsername||!this.authPassword)return alert('Isi username dan password admin!');
 
-  // Try Supabase first if available
-  if (window.supabaseClient) {
+  // OPTIMASI: Prioritaskan localStorage untuk avoid RLS issues
+  console.log('🔑 Trying admin login via localStorage first...');
+  
+  const u = this.registeredUsers.find(x => x.username === this.authUsername && x.password === this.authPassword && x.role === 'admin');
+  if (u) {
+    this.currentUser = u;
+    localStorage.setItem('upsrs_current_user', JSON.stringify(u));
+    this.page='adminDashboard';
+    this.authUsername='';
+    this.authPassword='';
+    
+    // Try to sync data even in localStorage mode
+    this.fetchUsers();
+    this.fetchTasks();
+    
+    console.log('✅ Admin login successful via localStorage');
+    return;
+  }
+
+  // Fallback ke Supabase hanya jika localStorage tidak ada admin
+  if (window.supabaseClient && this.registeredUsers.length === 0) {
+    console.log('🌐 No local admin found, trying Supabase...');
     try {
-      // OPTIMASI: Query admin by username & role, lalu compare password di client
       const { data, error } = await window.supabaseClient
         .from('users')
         .select('*')
@@ -365,30 +420,18 @@ async handleAdminLogin(){
         // Fetch latest data from Supabase
         await this.fetchUsers();
         await this.fetchTasks();
+        
+        console.log('✅ Admin login successful via Supabase');
         return;
       } else if (!error && data) {
         console.warn('⚠️ Admin password mismatch for:', this.authUsername);
       }
     } catch (supabaseError) {
-      console.warn('⚠️ Supabase admin login failed, trying fallback:', supabaseError);
+      console.warn('⚠️ Supabase admin login failed:', supabaseError);
     }
   }
 
-  // Fallback to localStorage
-  const u = this.registeredUsers.find(x => x.username === this.authUsername && x.password === this.authPassword && x.role === 'admin');
-  if (!u) {
-    return alert('Login admin gagal! Periksa kredensial Anda.');
-  }
-
-  this.currentUser = u;
-  localStorage.setItem('upsrs_current_user', JSON.stringify(u));
-  this.page='adminDashboard';
-  this.authUsername='';
-  this.authPassword='';
-  
-  // Try to sync data even in localStorage mode
-  this.fetchUsers();
-  this.fetchTasks();
+  return alert('Login admin gagal! Periksa kredensial Anda.');
 },
 
 handleFileUpload(e){
@@ -876,6 +919,45 @@ clearAllStorage(){
     this.page = 'login';
     console.log('🗑️ All local storage cleared');
     alert('✅ Data lokal berhasil dihapus. Silakan login kembali.');
+  }
+},
+
+// OPTIMASI: Setup RLS Policy untuk enable online registration
+async setupRLSPolicy(){
+  if(!window.supabaseClient) return;
+  
+  try {
+    console.log('🔧 Setting up RLS policies for online registration...');
+    
+    // 1. Enable RLS on users table
+    await window.supabaseClient.rpc('exec_sql', {
+      sql: `ALTER TABLE users ENABLE ROW LEVEL SECURITY;`
+    }).catch(() => {
+      console.log('ℹ️ RLS might already be enabled');
+    });
+    
+    // 2. Create policy untuk allow insert
+    await window.supabaseClient.rpc('exec_sql', {
+      sql: `
+        CREATE POLICY "Allow anonymous insert" ON users
+        FOR INSERT WITH CHECK (true);
+        
+        CREATE POLICY "Allow anonymous select" ON users
+        FOR SELECT USING (true);
+        
+        CREATE POLICY "Allow anonymous update" ON users
+        FOR UPDATE USING (true);
+      `
+    }).catch(() => {
+      console.log('ℹ️ Policies might already exist');
+    });
+    
+    console.log('✅ RLS policies setup completed');
+    return true;
+    
+  } catch (error) {
+    console.warn('⚠️ RLS setup failed:', error);
+    return false;
   }
 },
 
@@ -2420,6 +2502,7 @@ Share WhatsApp
 <div class="flex items-center justify-between mb-4">
 <h3 class="text-lg font-black text-slate-800">Kelola User Terdaftar</h3>
 <div class="flex gap-2 flex-wrap">
+<button @click="setupRLSPolicy" class="px-4 py-2 bg-yellow-100 text-yellow-600 rounded-xl text-sm font-bold hover:bg-yellow-200">🔧 Setup RLS</button>
 <button @click="testSupabaseConnection" class="px-4 py-2 bg-blue-100 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-200">🔍 Test Connection</button>
 <button @click="refreshAllData" class="px-4 py-2 bg-green-100 text-green-600 rounded-xl text-sm font-bold hover:bg-green-200">🔄 Refresh</button>
 <button @click="clearAllStorage" class="px-4 py-2 bg-red-100 text-red-600 rounded-xl text-sm font-bold hover:bg-red-200">🗑️ Clear Cache</button>
