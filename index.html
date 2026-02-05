@@ -134,6 +134,9 @@ profile_photo:null
 
 initApp(){
 console.log('🚀 Initializing UPSRS GO...');
+console.log('🌐 Environment:', window.location.hostname);
+console.log('🚀 Deployment:', window.location.hostname.includes('vercel.app') ? 'Vercel Production' : 'Local Development');
+
 this.savedTasks=JSON.parse(localStorage.getItem('upsrs_tasks_v3')||'[]');
 this.registeredUsers=JSON.parse(localStorage.getItem('upsrs_users_v3')||'[]');
 
@@ -174,6 +177,13 @@ localStorage.setItem('upsrs_users_v3',JSON.stringify(this.registeredUsers));
 console.log('👑 Created default Admin user');
 }else{
 console.log('👑 Admin user already exists');
+}
+
+// Production environment check
+if(window.location.hostname.includes('vercel.app')) {
+  console.log('🌍 Running on Vercel Production');
+  console.log('📋 Supabase URL:', SUPABASE_URL);
+  console.log('🔑 Anon Key configured:', !!SUPABASE_ANON_KEY);
 }
 
 console.log('✅ UPSRS GO initialized successfully');
@@ -922,41 +932,74 @@ clearAllStorage(){
   }
 },
 
-// OPTIMASI: Setup RLS Policy untuk enable online registration
+// OPTIMASI: Setup RLS Policy untuk enable online registration (Production Ready)
 async setupRLSPolicy(){
   if(!window.supabaseClient) return;
   
   try {
-    console.log('🔧 Setting up RLS policies for online registration...');
+    console.log('🔧 Setting up RLS policies for Vercel production...');
     
-    // 1. Enable RLS on users table
-    await window.supabaseClient.rpc('exec_sql', {
-      sql: `ALTER TABLE users ENABLE ROW LEVEL SECURITY;`
-    }).catch(() => {
-      console.log('ℹ️ RLS might already be enabled');
-    });
+    // 1. Test basic connection first
+    const { data: testData, error: testError } = await window.supabaseClient
+      .from('users')
+      .select('count')
+      .limit(1);
     
-    // 2. Create policy untuk allow insert
-    await window.supabaseClient.rpc('exec_sql', {
-      sql: `
-        CREATE POLICY "Allow anonymous insert" ON users
-        FOR INSERT WITH CHECK (true);
-        
-        CREATE POLICY "Allow anonymous select" ON users
-        FOR SELECT USING (true);
-        
-        CREATE POLICY "Allow anonymous update" ON users
-        FOR UPDATE USING (true);
-      `
-    }).catch(() => {
-      console.log('ℹ️ Policies might already exist');
-    });
+    if(testError) {
+      console.warn('⚠️ Basic connection test failed:', testError);
+      alert('❌ Koneksi Supabase gagal. Periksa RLS policy di dashboard Supabase.');
+      return false;
+    }
     
-    console.log('✅ RLS policies setup completed');
+    // 2. Try simple insert test untuk detect RLS issues
+    const testUser = {
+      name: 'RLS Test User',
+      username: `test_${Date.now()}`,
+      password: 'test123',
+      role: 'user',
+      specialization: 'test',
+      profile_photo: null
+    };
+    
+    const { error: insertError } = await window.supabaseClient
+      .from('users')
+      .insert([testUser]);
+    
+    if(insertError) {
+      console.warn('⚠️ RLS Policy blocks insert:', insertError);
+      
+      // Tampilkan error detail untuk debugging
+      let errorMessage = '❌ RLS Policy memblok pendaftaran online.\n\n';
+      errorMessage += `Error Code: ${insertError.code}\n`;
+      errorMessage += `Error Message: ${insertError.message}\n\n`;
+      errorMessage += 'Solusi:\n';
+      errorMessage += '1. Buka Supabase Dashboard\n';
+      errorMessage += '2. Go to Authentication > Policies\n';
+      errorMessage += '3. Create policy untuk users table:\n\n';
+      errorMessage += `CREATE POLICY "Enable insert" ON users\n`;
+      errorMessage += `FOR INSERT WITH CHECK (true);\n\n`;
+      errorMessage += `CREATE POLICY "Enable select" ON users\n`;
+      errorMessage += `FOR SELECT USING (true);`;
+      
+      alert(errorMessage);
+      return false;
+    } else {
+      console.log('✅ RLS allows insert - cleaning up test user...');
+      
+      // Clean up test user
+      await window.supabaseClient
+        .from('users')
+        .delete()
+        .eq('username', testUser.username);
+    }
+    
+    console.log('✅ RLS policies are working correctly for production');
+    alert('✅ RLS Policy sudah OK! Pendaftaran online sudah aktif.');
     return true;
     
   } catch (error) {
     console.warn('⚠️ RLS setup failed:', error);
+    alert('❌ Error setup RLS: ' + error.message);
     return false;
   }
 },
